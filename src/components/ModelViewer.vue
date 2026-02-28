@@ -246,28 +246,38 @@ function updateWindTrails() {
   const tips = [leftTipWorld, rightTipWorld]
 
   for (let t = 0; t < 2; t++) {
+    const trail = trailPositions[t]
+    const particle = trailParticles[t]
+    const tip = tips[t]
+    if (!trail || !particle || !tip) continue
+
     // Add new position
-    trailPositions[t].unshift(tips[t].clone())
+    trail.unshift(tip.clone())
 
     // Remove old positions
-    while (trailPositions[t].length > trailLength) {
-      trailPositions[t].pop()
+    while (trail.length > trailLength) {
+      trail.pop()
     }
 
     // Update geometry
-    const positionAttribute = trailParticles[t].geometry.getAttribute('position') as THREE.BufferAttribute
-    for (let i = 0; i < trailLength; i++) {
-      if (i < trailPositions[t].length) {
-        positionAttribute.setXYZ(i, trailPositions[t][i].x, trailPositions[t][i].y, trailPositions[t][i].z)
-      } else {
-        positionAttribute.setXYZ(i, 0, -1000, 0) // Hide unused points
+    const positionAttribute = particle.geometry.getAttribute('position') as THREE.BufferAttribute | null
+    if (positionAttribute) {
+      for (let i = 0; i < trailLength; i++) {
+        const trailPos = trail[i]
+        if (i < trail.length && trailPos) {
+          positionAttribute.setXYZ(i, trailPos.x, trailPos.y, trailPos.z)
+        } else {
+          positionAttribute.setXYZ(i, 0, -1000, 0) // Hide unused points
+        }
       }
+      positionAttribute.needsUpdate = true
     }
-    positionAttribute.needsUpdate = true
 
     // Fade based on position in trail
-    const material = trailParticles[t].material as THREE.PointsMaterial
-    material.opacity = isLocked.value ? 0.5 : 0.2
+    const material = particle.material as THREE.PointsMaterial | null
+    if (material) {
+      material.opacity = isLocked.value ? 0.5 : 0.2
+    }
   }
 }
 
@@ -328,7 +338,7 @@ function onMouseMove(event: MouseEvent) {
   mouseY += event.movementY * turnSpeed
 }
 
-function updateBird(delta: number) {
+function updateBird() {
   // Apply mouse movement to bird rotation
   yaw -= mouseX
   pitch -= mouseY
@@ -403,7 +413,7 @@ function animate() {
   lastTime = currentTime
 
   if (isLocked.value) {
-    updateBird(delta)
+    updateBird()
   }
 
   // Always animate wings and trails
@@ -420,10 +430,6 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
-}
-
-function exitPointerLock() {
-  document.exitPointerLock()
 }
 
 onMounted(init)
