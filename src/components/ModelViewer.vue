@@ -27,11 +27,20 @@ class WingTrailingParticleManager {
     // Create geometry
     this.geometry = new THREE.BufferGeometry()
     const positions = new Float32Array(maxParticles * 3)
+    positions.fill(0) // Initialize with zeros to avoid NaN
     const opacities = new Float32Array(maxParticles)
     opacities.fill(0)
 
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    this.geometry.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1))
+    const posAttr = new THREE.BufferAttribute(positions, 3)
+    const opacityAttr = new THREE.BufferAttribute(opacities, 1)
+    posAttr.setUsage(THREE.DynamicDrawUsage)
+    opacityAttr.setUsage(THREE.DynamicDrawUsage)
+
+    this.geometry.setAttribute('position', posAttr)
+    this.geometry.setAttribute('opacity', opacityAttr)
+    this.geometry.computeBoundingSphere()
+
+    console.log('WingTrailingParticleManager created:', { maxParticles })
 
     // Create material
     this.material = new THREE.PointsMaterial({
@@ -42,7 +51,7 @@ class WingTrailingParticleManager {
       depthWrite: false,
     })
 
-    this.material.onBeforeCompile = (shader) => {
+    this.material.onBeforeCompile = (shader: any) => {
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
         `
@@ -79,12 +88,24 @@ class WingTrailingParticleManager {
         windSeed: Math.random() * 1000,
         driftStartTime: now + 2, // Start drifting after 2 seconds
       })
+
+      if (this.particles.length === 1) {
+        console.log('First particle spawned!', {
+          position: position,
+          particleCount: this.particles.length,
+        })
+      }
     }
   }
 
   update(currentTime: number, baseOpacity: number = 0.5) {
     const positionAttribute = this.geometry.getAttribute('position') as THREE.BufferAttribute
     const opacityAttribute = this.geometry.getAttribute('opacity') as THREE.BufferAttribute
+
+    if (!positionAttribute || !opacityAttribute) {
+      console.error('Missing particle attributes!')
+      return
+    }
 
     // Remove dead particles
     this.particles = this.particles.filter((p) => currentTime - p.birthTime < p.lifespan)
@@ -141,6 +162,9 @@ class WingTrailingParticleManager {
 
     positionAttribute.needsUpdate = true
     opacityAttribute.needsUpdate = true
+
+    // Update bounding sphere for frustum culling
+    this.geometry.computeBoundingSphere()
   }
 
   dispose() {
