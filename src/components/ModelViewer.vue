@@ -1,6 +1,154 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import * as THREE from 'three'
+// @ts-expect-error GLTFLoader import
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
+
+// Wing Trailing Particle Manager
+class WingTrailingParticleManager {
+  private particles: Array<{
+    spawnPosition: THREE.Vector3
+    birthTime: number
+    lifespan: number
+    windSeed: number
+    driftStartTime: number // When drift begins (5 seconds after birth)
+    targetPosition?: THREE.Vector3
+    driftStartPosition?: THREE.Vector3
+  }> = []
+
+  private geometry: THREE.BufferGeometry
+  private material: THREE.PointsMaterial
+  private points: THREE.Points
+  private maxParticles: number
+
+  constructor(scene: THREE.Scene, maxParticles: number = 600) {
+    this.maxParticles = maxParticles
+
+    // Create geometry
+    this.geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(maxParticles * 3)
+    const opacities = new Float32Array(maxParticles)
+    opacities.fill(0)
+
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    this.geometry.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1))
+
+    // Create material
+    this.material = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.15,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+
+    this.material.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `
+        #include <common>
+        attribute float opacity;
+        varying float vOpacity;
+        `,
+      )
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `
+        #include <begin_vertex>
+        vOpacity = opacity;
+        `,
+      )
+      shader.fragmentShader = shader.fragmentShader.replace(
+        'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+        'gl_FragColor = vec4( outgoingLight, diffuseColor.a * vOpacity );',
+      )
+    }
+
+    this.points = new THREE.Points(this.geometry, this.material)
+    this.points.frustumCulled = false
+    scene.add(this.points)
+  }
+
+  spawn(position: THREE.Vector3, lifespan: number = 10) {
+    if (this.particles.length < this.maxParticles) {
+      const now = performance.now() / 1000
+      this.particles.push({
+        spawnPosition: position.clone(),
+        birthTime: now,
+        lifespan,
+        windSeed: Math.random() * 1000,
+        driftStartTime: now + 2, // Start drifting after 2 seconds
+      })
+    }
+  }
+
+  update(currentTime: number, baseOpacity: number = 0.5) {
+    const positionAttribute = this.geometry.getAttribute('position') as THREE.BufferAttribute
+    const opacityAttribute = this.geometry.getAttribute('opacity') as THREE.BufferAttribute
+
+    // Remove dead particles
+    this.particles = this.particles.filter((p) => currentTime - p.birthTime < p.lifespan)
+
+    // Update alive particles
+    for (let i = 0; i < this.maxParticles; i++) {
+      if (i < this.particles.length) {
+        const particle = this.particles[i]!
+        const age = currentTime - particle.birthTime
+
+        let finalPos = particle.spawnPosition.clone()
+
+        // After 2 seconds, start drifting to a random position
+        if (age >= 2) {
+          // Generate target position on first drift frame
+          if (!particle.targetPosition) {
+            particle.driftStartPosition = particle.spawnPosition.clone()
+            particle.targetPosition = particle.spawnPosition
+              .clone()
+              .add(
+                new THREE.Vector3(
+                  (Math.random() - 0.5) * 2,
+                  (Math.random() - 0.5) * 1.5,
+                  (Math.random() - 0.5) * 2,
+                ),
+              )
+          }
+
+          // Lerp towards target position
+          const driftDuration = particle.lifespan - 2 // Remaining time after drift starts
+          const timeSinceDriftStart = age - 2
+          const driftProgress = Math.min(1, timeSinceDriftStart / driftDuration)
+
+          if (particle.driftStartPosition && particle.targetPosition) {
+            finalPos.lerpVectors(
+              particle.driftStartPosition,
+              particle.targetPosition,
+              driftProgress,
+            )
+          }
+        }
+
+        positionAttribute.setXYZ(i, finalPos.x, finalPos.y, finalPos.z)
+
+        // Fade out in last 2 seconds
+        const fadeStart = particle.lifespan - 2
+        const fadeFactor = Math.max(0, 1 - Math.max(0, age - fadeStart) / 2)
+        opacityAttribute.setX(i, baseOpacity * fadeFactor)
+      } else {
+        positionAttribute.setXYZ(i, 0, -1000, 0)
+        opacityAttribute.setX(i, 0)
+      }
+    }
+
+    positionAttribute.needsUpdate = true
+    opacityAttribute.needsUpdate = true
+  }
+
+  dispose() {
+    this.geometry.dispose()
+    this.material.dispose()
+    this.points.removeFromParent()
+  }
+}
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isLocked = ref(false)
@@ -24,10 +172,11 @@ let wingTime = 0
 const wingFlapSpeed = 8
 const wingFlapAmount = 0.4
 
-// Wind trails
-const trailParticles: THREE.Points[] = []
-const trailPositions: THREE.Vector3[][] = []
-const trailLength = 30
+// Particle managers for wings
+let leftWingParticles: WingTrailingParticleManager
+let rightWingParticles: WingTrailingParticleManager
+let lastTrailUpdateTime = 0
+const trailUpdateInterval = 0.016 // ~60fps
 
 // Camera offset for third person view
 const cameraOffset = new THREE.Vector3(0, 2, 8)
@@ -37,12 +186,23 @@ const cameraLookOffset = new THREE.Vector3(0, 0, -10)
 let mouseX = 0
 let mouseY = 0
 
+// Touch control
+let touchStartX = 0
+let touchStartY = 0
+let touchX = 0
+let touchY = 0
+let isTouching = false
+
 // Bird rotation (euler angles)
 let yaw = 0
 let pitch = 0
+let roll = 0
 
 // Sun light reference for shadow following
 let sunLight: THREE.DirectionalLight
+
+// Skybox
+let skyboxGroup: THREE.Group
 
 function init() {
   const canvas = canvasRef.value!
@@ -64,13 +224,20 @@ function init() {
   const skyColor = new THREE.Color(0x87ceeb)
   const horizonColor = new THREE.Color(0xffeedd)
   scene.background = skyColor
-  scene.fog = new THREE.Fog(horizonColor, 50, 500)
+  scene.fog = new THREE.Fog(horizonColor, 200, 800)
 
   // Camera
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000)
 
   // Lighting
   setupLighting()
+
+  // Load skybox
+  loadSkybox()
+
+  // Create particle managers
+  leftWingParticles = new WingTrailingParticleManager(scene, 600)
+  rightWingParticles = new WingTrailingParticleManager(scene, 600)
 
   // Create bird
   createBird()
@@ -83,6 +250,9 @@ function init() {
   document.addEventListener('pointerlockchange', onPointerLockChange)
   document.addEventListener('mousemove', onMouseMove)
   canvas.addEventListener('click', requestPointerLock)
+  canvas.addEventListener('touchstart', onTouchStart)
+  canvas.addEventListener('touchmove', onTouchMove)
+  canvas.addEventListener('touchend', onTouchEnd)
 
   animate()
 }
@@ -113,14 +283,32 @@ function setupLighting() {
   scene.add(hemiLight)
 }
 
+function loadSkybox() {
+  const loader = new GLTFLoader()
+  loader.load('/gltf/skybox_savanna.glb', (gltf: any) => {
+    skyboxGroup = new THREE.Group()
+
+    // Add all meshes from the skybox to the group
+    gltf.scene.traverse((child: any) => {
+      if (child instanceof THREE.Mesh) {
+        skyboxGroup.add(child.clone())
+      }
+    })
+
+    // Rotate skybox 90 degrees on X and Z axes
+    skyboxGroup.rotation.x = -Math.PI / 2
+    skyboxGroup.position.y -= 100
+
+    // Scale the skybox to be large enough to surround the scene
+    skyboxGroup.scale.set(500, 500, 500)
+    scene.add(skyboxGroup)
+  })
+}
+
 function updateSunLight() {
   // Make sun light follow the bird for consistent shadows
   if (bird && sunLight) {
-    sunLight.position.set(
-      bird.position.x + 50,
-      bird.position.y + 80,
-      bird.position.z + 30
-    )
+    sunLight.position.set(bird.position.x + 50, bird.position.y + 80, bird.position.z + 30)
     sunLight.target.position.copy(bird.position)
   }
 }
@@ -201,84 +389,38 @@ function createBird() {
   bird.position.set(0, 30, 0)
 
   scene.add(bird)
-
-  // Create wind trails for each wing
-  createWindTrails()
 }
 
-function createWindTrails() {
-  const trailMaterial = new THREE.PointsMaterial({
-    color: 0xffffff,
-    size: 0.15,
-    transparent: true,
-    opacity: 0.6,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  })
+function updateWindTrails(currentTime: number = performance.now() / 1000) {
+  if (!bird || !leftWingParticles || !rightWingParticles) return
 
-  // Create two trails, one for each wingtip
-  for (let t = 0; t < 2; t++) {
-    const positions = new Float32Array(trailLength * 3)
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-
-    const trail = new THREE.Points(geometry, trailMaterial.clone())
-    trail.frustumCulled = false
-    scene.add(trail)
-    trailParticles.push(trail)
-    trailPositions.push([])
+  // Only spawn particles at intervals to avoid too many
+  if (currentTime - lastTrailUpdateTime < trailUpdateInterval) {
+    return
   }
-}
+  lastTrailUpdateTime = currentTime
 
-function updateWindTrails() {
-  if (!bird || trailParticles.length < 2) return
-
-  // Get wingtip positions in world space
+  // Get wingtip positions accounting for wing rotation animation
+  // Left wing tip (rotates around its position with rotation.z)
   const leftTipLocal = new THREE.Vector3(-1.4, 0, 0.1)
-  const rightTipLocal = new THREE.Vector3(1.4, 0, 0.1)
+  leftTipLocal.applyAxisAngle(new THREE.Vector3(0, 0, 1), leftWing.rotation.z)
+  leftTipLocal.add(leftWing.position)
 
+  // Right wing tip
+  const rightTipLocal = new THREE.Vector3(1.4, 0, 0.1)
+  rightTipLocal.applyAxisAngle(new THREE.Vector3(0, 0, 1), rightWing.rotation.z)
+  rightTipLocal.add(rightWing.position)
+
+  // Convert to world space
   const leftTipWorld = leftTipLocal.clone()
   bird.localToWorld(leftTipWorld)
 
   const rightTipWorld = rightTipLocal.clone()
   bird.localToWorld(rightTipWorld)
 
-  const tips = [leftTipWorld, rightTipWorld]
-
-  for (let t = 0; t < 2; t++) {
-    const trail = trailPositions[t]
-    const particle = trailParticles[t]
-    const tip = tips[t]
-    if (!trail || !particle || !tip) continue
-
-    // Add new position
-    trail.unshift(tip.clone())
-
-    // Remove old positions
-    while (trail.length > trailLength) {
-      trail.pop()
-    }
-
-    // Update geometry
-    const positionAttribute = particle.geometry.getAttribute('position') as THREE.BufferAttribute | null
-    if (positionAttribute) {
-      for (let i = 0; i < trailLength; i++) {
-        const trailPos = trail[i]
-        if (i < trail.length && trailPos) {
-          positionAttribute.setXYZ(i, trailPos.x, trailPos.y, trailPos.z)
-        } else {
-          positionAttribute.setXYZ(i, 0, -1000, 0) // Hide unused points
-        }
-      }
-      positionAttribute.needsUpdate = true
-    }
-
-    // Fade based on position in trail
-    const material = particle.material as THREE.PointsMaterial | null
-    if (material) {
-      material.opacity = isLocked.value ? 0.5 : 0.2
-    }
-  }
+  // Spawn particles at wingtips
+  leftWingParticles.spawn(leftTipWorld, 10)
+  rightWingParticles.spawn(rightTipWorld, 10)
 }
 
 function updateWings(delta: number) {
@@ -312,8 +454,8 @@ function createGround() {
   for (let i = 0; i < positionAttribute.count; i++) {
     const x = positionAttribute.getX(i)
     const y = positionAttribute.getY(i)
-    const z = Math.sin(x * 0.02) * Math.cos(y * 0.02) * 5 +
-              Math.sin(x * 0.05) * Math.cos(y * 0.03) * 3
+    const z =
+      Math.sin(x * 0.02) * Math.cos(y * 0.02) * 5 + Math.sin(x * 0.05) * Math.cos(y * 0.03) * 3
     positionAttribute.setZ(i, z)
   }
   positionAttribute.needsUpdate = true
@@ -338,21 +480,75 @@ function onMouseMove(event: MouseEvent) {
   mouseY += event.movementY * turnSpeed
 }
 
-function updateBird() {
-  // Apply mouse movement to bird rotation
-  yaw -= mouseX
-  pitch -= mouseY
+function onTouchStart(event: TouchEvent) {
+  if (event.touches.length === 0) return
+  isTouching = true
+  const touch = event.touches[0]!
+  touchStartX = touch.clientX
+  touchStartY = touch.clientY
+}
 
-  // Clamp pitch
+function onTouchMove(event: TouchEvent) {
+  if (!isTouching || event.touches.length === 0) return
+  const touch = event.touches[0]!
+  touchX = touch.clientX - touchStartX
+  touchY = touch.clientY - touchStartY
+}
+
+function onTouchEnd() {
+  isTouching = false
+  touchX = 0
+  touchY = 0
+}
+
+function updateBird() {
+  // Get input from mouse or touch
+  let inputX = mouseX
+  let inputY = mouseY
+
+  if (isTouching && (touchX !== 0 || touchY !== 0)) {
+    // Normalize touch vector
+    const touchMagnitude = Math.sqrt(touchX * touchX + touchY * touchY)
+    if (touchMagnitude > 0) {
+      // Normalize to [-1, 1]
+      const normalizedX = touchX / touchMagnitude
+      const normalizedY = touchY / touchMagnitude
+
+      // Apply sensitivity (adjust for desired responsiveness)
+      const touchSensitivity = 0.01
+      inputX = normalizedX * touchSensitivity
+      inputY = normalizedY * touchSensitivity
+    }
+  }
+
+  // Clamp input vectors to max 45 degrees per frame
+  const maxRotationPerFrame = Math.PI / 4 // 45 degrees
+  const inputMagnitude = Math.sqrt(inputX * inputX + inputY * inputY)
+  if (inputMagnitude > maxRotationPerFrame) {
+    const scale = maxRotationPerFrame / inputMagnitude
+    inputX *= scale
+    inputY *= scale
+  }
+
+  // Apply input to bird rotation
+  yaw -= inputX
+  pitch -= inputY
+
+  // Clamp pitch to max 45 degrees
   pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch))
+
+  // Calculate banking (roll) based on yaw input
+  // This makes the bird tilt in the direction it's turning
+  const targetRoll = -inputX * 0.5
+  roll = THREE.MathUtils.lerp(roll, targetRoll, 0.15)
 
   // Reset mouse accumulators
   mouseX = 0
   mouseY = 0
 
-  // Create rotation quaternion from euler angles
+  // Create rotation quaternion from euler angles with roll
   const quaternion = new THREE.Quaternion()
-  quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'))
+  quaternion.setFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ'))
   bird.quaternion.copy(quaternion)
 
   // Calculate forward direction
@@ -361,10 +557,6 @@ function updateBird() {
 
   // Move bird forward continuously
   bird.position.add(forward.multiplyScalar(birdSpeed))
-
-  // Add slight banking based on yaw change (visual effect)
-  const targetRoll = -mouseX * 20
-  bird.rotation.z = THREE.MathUtils.lerp(bird.rotation.z, targetRoll, 0.1)
 
   // Keep bird above ground
   if (bird.position.y < 2) {
@@ -412,16 +604,28 @@ function animate() {
   const delta = (currentTime - lastTime) / 1000
   lastTime = currentTime
 
-  if (isLocked.value) {
+  if (isLocked.value || isTouching) {
     updateBird()
   }
 
   // Always animate wings and trails
   updateWings(delta)
-  updateWindTrails()
+  updateWindTrails(currentTime / 1000)
+
+  // Update particle systems
+  const baseOpacity = isLocked.value ? 0.5 : 0.2
+  if (leftWingParticles) leftWingParticles.update(currentTime / 1000, baseOpacity)
+  if (rightWingParticles) rightWingParticles.update(currentTime / 1000, baseOpacity)
+
   updateSunLight()
 
   updateCamera()
+
+  // Update skybox position to follow camera
+  if (skyboxGroup) {
+    skyboxGroup.position.x = camera.position.x
+    skyboxGroup.position.z = camera.position.z
+  }
 
   renderer.render(scene, camera)
 }
@@ -436,9 +640,14 @@ onMounted(init)
 onUnmounted(() => {
   cancelAnimationFrame(rafId)
   renderer.dispose()
+  if (leftWingParticles) leftWingParticles.dispose()
+  if (rightWingParticles) rightWingParticles.dispose()
   window.removeEventListener('resize', onResize)
   document.removeEventListener('pointerlockchange', onPointerLockChange)
   document.removeEventListener('mousemove', onMouseMove)
+  canvasRef.value?.removeEventListener('touchstart', onTouchStart)
+  canvasRef.value?.removeEventListener('touchmove', onTouchMove)
+  canvasRef.value?.removeEventListener('touchend', onTouchEnd)
 })
 </script>
 
@@ -448,7 +657,11 @@ onUnmounted(() => {
 
     <!-- Instructions overlay -->
     <Transition name="fade">
-      <div v-if="showInstructions && !isLocked" class="instructions-overlay" @click="requestPointerLock">
+      <div
+        v-if="showInstructions && !isLocked"
+        class="instructions-overlay"
+        @click="requestPointerLock"
+      >
         <div class="instructions-box">
           <h2>Vol d'Oiseau</h2>
           <p class="main-instruction">Cliquez pour commencer</p>
