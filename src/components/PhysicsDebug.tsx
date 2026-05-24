@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useScene, useBeforeRender } from 'react-babylonjs'
-import { MeshBuilder, Color3, type LinesMesh } from '@babylonjs/core'
+import { MeshBuilder, Color3, Vector3, type LinesMesh } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
 
 export const PhysicsDebug = () => {
@@ -31,11 +31,11 @@ export const PhysicsDebug = () => {
     if (!physics) return
 
     const { vertices } = physics.world.debugRender()
-    const lines: { x: number; y: number; z: number }[][] = []
+    const lines: Vector3[][] = []
     for (let i = 0; i < vertices.length; i += 6) {
       lines.push([
-        { x: vertices[i], y: vertices[i + 1], z: vertices[i + 2] },
-        { x: vertices[i + 3], y: vertices[i + 4], z: vertices[i + 5] },
+        new Vector3(vertices[i], vertices[i + 1], vertices[i + 2]),
+        new Vector3(vertices[i + 3], vertices[i + 4], vertices[i + 5]),
       ])
     }
     if (lines.length === 0) return
