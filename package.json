@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@babylonjs/core": "^9.7.0",
+    "@babylonjs/gui": "^9.7.0",
     "@babylonjs/loaders": "^9.7.0",
     "@dimforge/rapier3d-compat": "^0.19.3",
     "react": "^19.2.5",
