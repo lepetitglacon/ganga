@@ -1,17 +1,78 @@
-export const TERRAIN_SIZE = 200
-export const TERRAIN_SUBDIVISIONS = 64
+import { Vector3 } from '@babylonjs/core'
 
-function heightAt(x: number, z: number): number {
+export const TERRAIN_SIZE = 800
+export const TERRAIN_SUBDIVISIONS = 192
+
+// Cheap hash-based pseudo-random in [0..1)
+function hash2(x: number, y: number): number {
+  let h = (x | 0) * 374761393 + (y | 0) * 668265263
+  h = (h ^ (h >> 13)) * 1274126177
+  return ((h ^ (h >> 16)) >>> 0) / 4294967295
+}
+
+function smooth(t: number): number {
+  return t * t * (3 - 2 * t)
+}
+
+// Bilinearly-interpolated value noise on an integer grid.
+function valueNoise(x: number, y: number): number {
+  const xi = Math.floor(x)
+  const yi = Math.floor(y)
+  const xf = x - xi
+  const yf = y - yi
+  const v00 = hash2(xi, yi)
+  const v10 = hash2(xi + 1, yi)
+  const v01 = hash2(xi, yi + 1)
+  const v11 = hash2(xi + 1, yi + 1)
+  const u = smooth(xf)
+  const v = smooth(yf)
   return (
-    Math.sin(x * 0.05) * Math.cos(z * 0.04) * 10 +
-    Math.sin(x * 0.13 + 0.7) * Math.cos(z * 0.11) * 5 +
-    Math.sin(x * 0.3) * Math.cos(z * 0.25 + 1.2) * 2 +
-    Math.sin(x * 0.7 + 2.1) * Math.cos(z * 0.6) * 1
+    v00 * (1 - u) * (1 - v) +
+    v10 * u * (1 - v) +
+    v01 * (1 - u) * v +
+    v11 * u * v
   )
+}
+
+function fbm(x: number, y: number, octaves: number, gain: number): number {
+  let amp = 1
+  let freq = 1
+  let sum = 0
+  let norm = 0
+  for (let i = 0; i < octaves; i++) {
+    sum += amp * valueNoise(x * freq, y * freq)
+    norm += amp
+    amp *= gain
+    freq *= 2
+  }
+  return sum / norm
+}
+
+// Domain-warped fbm gives curvy, crescent-like dune crests instead of
+// the radially-symmetric blobs that raw fbm produces.
+function heightAt(x: number, z: number): number {
+  const wx = fbm(x * 0.004, z * 0.004, 3, 0.5)
+  const wz = fbm((x + 137) * 0.004, (z + 53) * 0.004, 3, 0.5)
+  const base = fbm(x * 0.00175 + wx * 3.0, z * 0.00175 + wz * 3.0, 5, 0.55)
+  const ripples = (fbm(x * 0.18, z * 0.18, 2, 0.5) - 0.5) * 0.7
+  return (base - 0.5) * 150 + ripples
 }
 
 export function getTerrainHeight(worldX: number, worldZ: number): number {
   return heightAt(worldX, worldZ)
+}
+
+// Analytical surface normal via central differences on the height field.
+// Eps is in world units — larger eps smooths out small ripples so the
+// returned normal reflects the *dune slope*, not surface roughness.
+export function getTerrainNormal(x: number, z: number, eps = 2): Vector3 {
+  const hL = heightAt(x - eps, z)
+  const hR = heightAt(x + eps, z)
+  const hD = heightAt(x, z - eps)
+  const hU = heightAt(x, z + eps)
+  // Gradient (dh/dx, dh/dz) → surface normal is (-dh/dx, 1, -dh/dz).
+  const n = new Vector3((hL - hR) / (2 * eps), 1, (hD - hU) / (2 * eps))
+  return n.normalize()
 }
 
 export function generateHeightData(): Float32Array {

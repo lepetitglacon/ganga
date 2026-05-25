@@ -18,7 +18,8 @@ import {
 } from '@/game/physics.ts'
 import { gameStore } from '@/game/gameStore.ts'
 import { useKeyboard } from '@/hooks/useKeyboard.ts'
-import { getTerrainHeight } from '@/game/terrain.ts'
+import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
+import { SUN_DIR } from '@/game/world.ts'
 import { terrainHeights } from '@/components/Terrain.tsx'
 
 // Horizon = level flight. camBeta is measured from +Y, so π/2 is horizontal.
@@ -28,6 +29,14 @@ const FLIGHT_HORIZON_BETA = Math.PI / 2
 const WALK_SPEED = 4
 const FLIGHT_SPEED = 14
 const TAKEOFF_COOLDOWN = 0.5
+
+// Thermal updraft tuning.
+// Thermals form over sun-facing slopes (warm rising air). We measure that
+// via dot(terrainNormal, sunDir); only the positive side counts.
+const THERMAL_MAX_ALTITUDE = 90 // m above terrain; effect fades to 0 above this
+const THERMAL_SPEED_BOOST = 0.9 // +90% flight speed at peak
+const THERMAL_LIFT = 7 // m/s extra upward velocity at peak
+const THERMAL_SLOPE_THRESHOLD = 0.08 // ignore near-flat ground
 
 // Feather-style float
 const BANK_PER_YAW_RATE = 0.9 // how hard the bird rolls into turns
@@ -200,17 +209,39 @@ export const Player = () => {
       if (takeoffCooldownRef.current > 0) {
         takeoffCooldownRef.current -= dt
       } else {
+        // --- Thermal updraft ---
+        // Sample the dune's slope under the bird. Sun-facing slopes radiate
+        // warmth → rising air. Only slopes that are both (a) tilted enough
+        // and (b) oriented toward the sun produce a thermal.
+        const t = body.translation()
+        const terrainY = getTerrainHeight(t.x, t.z)
+        const altitude = t.y - terrainY
+        let thermal = 0
+        if (altitude > 0 && altitude < THERMAL_MAX_ALTITUDE) {
+          const normal = getTerrainNormal(t.x, t.z, 3)
+          const facing = Vector3.Dot(normal, SUN_DIR) // -1..1
+          const slope = 1 - normal.y // 0 = flat, 1 = vertical
+          if (facing > 0 && slope > THERMAL_SLOPE_THRESHOLD) {
+            const altFalloff = 1 - altitude / THERMAL_MAX_ALTITUDE
+            thermal = facing * slope * altFalloff
+          }
+        }
+        gameStore.thermal = thermal
+
+        const speedMul = 1 + thermal * THERMAL_SPEED_BOOST
+        const lift = thermal * THERMAL_LIFT
         body.setLinvel(
           {
-            x: Math.sin(yaw) * Math.cos(pitch) * FLIGHT_SPEED,
-            y: Math.sin(pitch) * FLIGHT_SPEED,
-            z: Math.cos(yaw) * Math.cos(pitch) * FLIGHT_SPEED,
+            x: Math.sin(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
+            y: Math.sin(pitch) * FLIGHT_SPEED * speedMul + lift,
+            z: Math.cos(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
           },
           true
         )
 
         if (physics.isNearGround()) {
           gameStore.birdMode = 'grounded'
+          gameStore.thermal = 0
           body.setGravityScale(1, true)
           body.setLinvel({ x: 0, y: 0, z: 0 }, true)
         }

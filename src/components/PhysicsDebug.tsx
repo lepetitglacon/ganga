@@ -1,29 +1,25 @@
-import { useEffect, useRef } from 'react'
+import { useRef, useCallback } from 'react'
 import { useScene, useBeforeRender } from 'react-babylonjs'
 import { MeshBuilder, Color3, Vector3, type LinesMesh } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
+import { useDebug } from '@/hooks/useDebug.ts'
 
 export const PhysicsDebug = () => {
   const scene = useScene()
   const debugRef = useRef<LinesMesh | null>(null)
+  // Ref, not state: useBeforeRender captures its closure on first render and
+  // would never see a state update. The ref is read fresh every frame.
   const enabledRef = useRef(false)
 
-  useEffect(() => {
-    if (!scene) return
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || e.code !== 'KeyD') return
-      e.preventDefault()
-      enabledRef.current = !enabledRef.current
-      if (!enabledRef.current) {
+  useDebug(
+    useCallback((on: boolean) => {
+      enabledRef.current = on
+      if (!on) {
         debugRef.current?.dispose()
         debugRef.current = null
       }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [scene])
+    }, [])
+  )
 
   useBeforeRender(() => {
     if (!scene || !enabledRef.current) return

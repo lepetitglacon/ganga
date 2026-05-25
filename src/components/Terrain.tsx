@@ -57,7 +57,10 @@ export const Terrain = () => {
     vd.applyToMesh(mesh)
 
     const mat = new StandardMaterial('terrainMat', scene)
-    mat.diffuseColor = new Color3(0.32, 0.58, 0.22)
+    // Warm sand — slightly desaturated so the fog/sky paints the distance.
+    mat.diffuseColor = new Color3(0.86, 0.70, 0.46)
+    mat.specularColor = new Color3(0.18, 0.14, 0.08)
+    mat.specularPower = 48
     mesh.material = mat
     mesh.receiveShadows = true
 

@@ -16,4 +16,7 @@ export const gameStore = {
   // Derived each frame from camera angles
   birdYaw: 0,
   birdPitch: 0,
+  // 0..1 — current thermal strength under the bird (sun-facing slope updraft).
+  // Useful for HUD/VFX hooks; written by Player each frame.
+  thermal: 0,
 }
