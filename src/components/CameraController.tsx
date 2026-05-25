@@ -9,12 +9,48 @@ const BETA_MIN = 0.05
 const BETA_MAX = Math.PI - 0.05
 // Higher = camera snaps faster to the bird. Lower in flight so the bird
 // leads and the camera trails (Feather-style chase).
-const FOLLOW_LAG_FLYING = 2.8
+const FOLLOW_LAG_FLYING = 2.4
 const FOLLOW_LAG_GROUNDED = 20
+
+// --- Feather-style framing ---
+// Wider FOV gives the open-sky, panoramic feel.
+const BASE_FOV = 1.1 // ~63°
+// FOV opens up a bit more as speed climbs → sense of acceleration.
+const FOV_SPEED_BOOST = 0.18
+const SPEED_FOR_FULL_BOOST = 28 // m/s
+
+// Camera distance: wider on the ground (third-person-walk feel), closer in
+// flight where the bird drives the framing. Speed adds extra pull-back.
+const RADIUS_GROUNDED = 14
+const RADIUS_FLYING_BASE = 8
+const RADIUS_PER_SPEED = 0.45 // radius += speed * this
+const RADIUS_MAX = 32
+const RADIUS_LERP = 2.5
+
+// Screen-space framing: instead of offsetting the target by a fixed world
+// amount, we drive the bird's *NDC position* (Normalized Device Coords:
+// (0,0) = center, (±1, ±1) = corners). The world offset that achieves
+// this is derived each frame from radius + fov + aspect.
+//
+// Sign: mouse-left → alpha grows → yawRate > 0 → bird should be at +sx
+// (right edge). Mouse-up → beta shrinks → pitchRate < 0 → bird at -sy
+// (bottom). So sx = yawRate × gain, sy = pitchRate × gain (no flips).
+const SCREEN_YAW_GAIN = 0.18 // (rad/s) → NDC
+const SCREEN_PITCH_GAIN = 0.18
+const SCREEN_MAX_X = 0.72 // 0..1 — clamp before the absolute edge
+const SCREEN_MAX_Y = 0.6
+const LEAD_LERP = 4.5
 
 export const CameraController = () => {
   const scene = useScene()
   const lastTimeRef = useRef(performance.now())
+  const prevAlphaRef = useRef(gameStore.camAlpha)
+  const prevBetaRef = useRef(gameStore.camBeta)
+  // Base target before the look-ahead offset is applied — separating these
+  // lets the screen-space lead slide independently of the body-follow lerp.
+  const baseTargetRef = useRef(new Vector3(0, 0, 0))
+  // Smoothed bird NDC position. Drives the world target offset each frame.
+  const screenLeadRef = useRef({ sx: 0, sy: 0 })
 
   useEffect(() => {
     if (!scene) return
@@ -24,15 +60,16 @@ export const CameraController = () => {
       'arcCam',
       gameStore.camAlpha,
       gameStore.camBeta,
-      22,
+      RADIUS_GROUNDED,
       Vector3.Zero(),
       scene
     )
     arcCam.lowerRadiusLimit = 3
-    arcCam.upperRadiusLimit = 60
+    arcCam.upperRadiusLimit = RADIUS_MAX
     arcCam.lowerBetaLimit = BETA_MIN
     arcCam.upperBetaLimit = BETA_MAX
     arcCam.minZ = 0.1
+    arcCam.fov = BASE_FOV
     gameStore.arcCam = arcCam
 
     const freeCam = new UniversalCamera('freeCam', new Vector3(0, 5, -10), scene)
@@ -107,23 +144,85 @@ export const CameraController = () => {
     const dt = Math.min((now - lastTimeRef.current) / 1000, 0.05)
     lastTimeRef.current = now
 
-    // Target follows the physics body (not the visually-bobbing mesh),
-    // lagging in flight so the bird leads.
+    // --- Base target: follow physics body with lag ---
     const body = gameStore.physics?.playerBody
+    const k = gameStore.birdMode === 'flying' ? FOLLOW_LAG_FLYING : FOLLOW_LAG_GROUNDED
+    const tLag = 1 - Math.exp(-k * dt)
     if (body) {
       const bt = body.translation()
-      const k = gameStore.birdMode === 'flying' ? FOLLOW_LAG_FLYING : FOLLOW_LAG_GROUNDED
-      const t = 1 - Math.exp(-k * dt)
-      cam.target.set(
-        cam.target.x + (bt.x - cam.target.x) * t,
-        cam.target.y + (bt.y - cam.target.y) * t,
-        cam.target.z + (bt.z - cam.target.z) * t,
+      baseTargetRef.current.set(
+        baseTargetRef.current.x + (bt.x - baseTargetRef.current.x) * tLag,
+        baseTargetRef.current.y + (bt.y - baseTargetRef.current.y) * tLag,
+        baseTargetRef.current.z + (bt.z - baseTargetRef.current.z) * tLag,
       )
     } else if (mesh) {
-      const k = gameStore.birdMode === 'flying' ? FOLLOW_LAG_FLYING : FOLLOW_LAG_GROUNDED
-      const t = 1 - Math.exp(-k * dt)
-      Vector3.LerpToRef(cam.target, mesh.position, t, cam.target)
+      Vector3.LerpToRef(baseTargetRef.current, mesh.position, tLag, baseTargetRef.current)
     }
+
+    // --- Speed-aware framing ---
+    let speed = 0
+    if (body) {
+      const v = body.linvel()
+      speed = Math.hypot(v.x, v.y, v.z)
+    }
+    const groundedBase = gameStore.birdMode === 'flying' ? RADIUS_FLYING_BASE : RADIUS_GROUNDED
+    const targetRadius = Math.min(
+      groundedBase + speed * RADIUS_PER_SPEED,
+      RADIUS_MAX
+    )
+    cam.radius += (targetRadius - cam.radius) * (1 - Math.exp(-RADIUS_LERP * dt))
+
+    const speedT = Math.min(speed / SPEED_FOR_FULL_BOOST, 1)
+    cam.fov = BASE_FOV + speedT * FOV_SPEED_BOOST
+
+    // --- Screen-space lead (Feather framing) ---
+    // 1) Compute yaw/pitch rate from the mouse-driven camera angles.
+    let alphaDelta = gameStore.camAlpha - prevAlphaRef.current
+    if (alphaDelta > Math.PI) alphaDelta -= 2 * Math.PI
+    else if (alphaDelta < -Math.PI) alphaDelta += 2 * Math.PI
+    prevAlphaRef.current = gameStore.camAlpha
+    const yawRate = dt > 0 ? alphaDelta / dt : 0
+
+    const betaDelta = gameStore.camBeta - prevBetaRef.current
+    prevBetaRef.current = gameStore.camBeta
+    const pitchRate = dt > 0 ? betaDelta / dt : 0
+
+    // 2) Target bird position in NDC, clamped to corner box.
+    const leadActive = gameStore.birdMode === 'flying'
+    const targetSx = leadActive
+      ? Math.max(-SCREEN_MAX_X, Math.min(SCREEN_MAX_X, yawRate * SCREEN_YAW_GAIN))
+      : 0
+    const targetSy = leadActive
+      ? Math.max(-SCREEN_MAX_Y, Math.min(SCREEN_MAX_Y, pitchRate * SCREEN_PITCH_GAIN))
+      : 0
+
+    const lerpT = 1 - Math.exp(-LEAD_LERP * dt)
+    screenLeadRef.current.sx += (targetSx - screenLeadRef.current.sx) * lerpT
+    screenLeadRef.current.sy += (targetSy - screenLeadRef.current.sy) * lerpT
+    const sx = screenLeadRef.current.sx
+    const sy = screenLeadRef.current.sy
+
+    // 3) Convert NDC offset → world offset along camera right/up axes.
+    //    Right and up derived analytically from alpha/beta (LH coords,
+    //    world up = +Y). half-tan-fov × radius × NDC = world distance from
+    //    target at which the bird would project to (sx, sy).
+    const a = gameStore.camAlpha
+    const b = gameStore.camBeta
+    const sa = Math.sin(a), ca = Math.cos(a), sb = Math.sin(b), cb = Math.cos(b)
+    const rightX = -sa, rightZ = ca // rightY = 0
+    const upX = -ca * cb, upY = sb, upZ = -sa * cb
+    const aspect = scene?.getEngine().getAspectRatio(cam) ?? 16 / 9
+    const halfTan = Math.tan(cam.fov / 2)
+    // Bird should APPEAR at (sx, sy) → target must be offset OPPOSITE
+    // (subtract right × sx and up × sy).
+    const offR = sx * cam.radius * halfTan * aspect
+    const offU = sy * cam.radius * halfTan
+
+    cam.target.set(
+      baseTargetRef.current.x - rightX * offR - upX * offU,
+      baseTargetRef.current.y - upY * offU,
+      baseTargetRef.current.z - rightZ * offR - upZ * offU,
+    )
   })
 
   return null
