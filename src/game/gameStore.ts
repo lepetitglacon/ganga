@@ -19,4 +19,6 @@ export const gameStore = {
   // 0..1 — current thermal strength under the bird (sun-facing slope updraft).
   // Useful for HUD/VFX hooks; written by Player each frame.
   thermal: 0,
+  speed: 0,
+  flapCooldown: 0,
 }

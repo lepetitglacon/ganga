@@ -8,6 +8,7 @@ import {
   TrailMesh,
   StandardMaterial,
   Color3,
+  type AnimationGroup,
 } from '@babylonjs/core'
 import '@babylonjs/loaders/glTF'
 import {
@@ -26,9 +27,12 @@ import { terrainHeights } from '@/components/Terrain.tsx'
 // Looking up (camBeta > π/2) climbs, looking down (camBeta < π/2) dives.
 const FLIGHT_HORIZON_BETA = Math.PI / 2
 
-const WALK_SPEED = 4
+const WALK_SPEED = 5
 const FLIGHT_SPEED = 14
 const TAKEOFF_COOLDOWN = 0.5
+const FLAP_BOOST = 1.2 // +120% speed at peak
+const FLAP_DECAY = 0.55 // per-second exponential decay rate (slow)
+const FLAP_COOLDOWN = 0.5
 
 // Thermal updraft tuning.
 // Thermals form over sun-facing slopes (warm rising air). We measure that
@@ -58,6 +62,11 @@ export const Player = () => {
   const prevYawRef = useRef(0)
   const bankRef = useRef(0)
   const flightTimeRef = useRef(0)
+  const flapBoostRef = useRef(0)
+  const flapCooldownRef = useRef(0)
+  const flyAnimRef = useRef<AnimationGroup | null>(null)
+  const idleAnimRef = useRef<AnimationGroup | null>(null)
+  const prevBirdModeRef = useRef(gameStore.birdMode)
 
   useEffect(() => {
     if (!scene) return
@@ -75,6 +84,9 @@ export const Player = () => {
           body.setGravityScale(0, true)
           body.setLinvel({ x: 0, y: 6, z: 0 }, true)
         }
+      } else if (gameStore.birdMode === 'flying' && flapCooldownRef.current <= 0) {
+        flapBoostRef.current = FLAP_BOOST
+        flapCooldownRef.current = FLAP_COOLDOWN
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -110,6 +122,22 @@ export const Player = () => {
       if (sg) result.meshes.forEach((m) => sg.addShadowCaster(m))
 
       gameStore.mesh = carrier
+
+      // Animation groups exposed by the GLB — log so we know what's available.
+      console.log(
+        'bird.glb animations:',
+        result.animationGroups.map((g) => g.name)
+      )
+      for (const g of result.animationGroups) g.stop()
+      const flyAnim =
+        result.animationGroups.find((g) => /fly/i.test(g.name)) ?? null
+      const idleAnim =
+        result.animationGroups.find(
+          (g) => g !== flyAnim && /idle|ground|stand|default/i.test(g.name)
+        ) ?? result.animationGroups.find((g) => g !== flyAnim) ?? null
+      flyAnimRef.current = flyAnim
+      idleAnimRef.current = idleAnim
+      if (idleAnim) idleAnim.start(true)
 
       // Wing-tip trails (Feather-style). Compute tip offsets from the
       // mesh's local AABB so it works regardless of model scale.
@@ -206,6 +234,8 @@ export const Player = () => {
     }
 
     if (gameStore.birdMode === 'flying') {
+      if (flapCooldownRef.current > 0) flapCooldownRef.current -= dt
+      flapBoostRef.current *= Math.exp(-FLAP_DECAY * dt)
       if (takeoffCooldownRef.current > 0) {
         takeoffCooldownRef.current -= dt
       } else {
@@ -228,7 +258,7 @@ export const Player = () => {
         }
         gameStore.thermal = thermal
 
-        const speedMul = 1 + thermal * THERMAL_SPEED_BOOST
+        const speedMul = 1 + thermal * THERMAL_SPEED_BOOST + flapBoostRef.current
         const lift = thermal * THERMAL_LIFT
         body.setLinvel(
           {
@@ -242,10 +272,28 @@ export const Player = () => {
         if (physics.isNearGround()) {
           gameStore.birdMode = 'grounded'
           gameStore.thermal = 0
+          flapBoostRef.current = 0
+          flapCooldownRef.current = 0
           body.setGravityScale(1, true)
           body.setLinvel({ x: 0, y: 0, z: 0 }, true)
         }
       }
+    }
+
+    const v = body.linvel()
+    gameStore.speed = Math.hypot(v.x, v.y, v.z)
+    gameStore.flapCooldown = Math.max(0, flapCooldownRef.current)
+
+    // Animation transitions
+    if (gameStore.birdMode !== prevBirdModeRef.current) {
+      if (gameStore.birdMode === 'flying') {
+        idleAnimRef.current?.stop()
+        flyAnimRef.current?.start(false)
+      } else {
+        flyAnimRef.current?.stop()
+        idleAnimRef.current?.start(true)
+      }
+      prevBirdModeRef.current = gameStore.birdMode
     }
 
     physics.step(dt)

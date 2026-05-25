@@ -9,8 +9,8 @@ export const initRapier = (): Promise<void> => {
   return initPromise
 }
 
-export const CAPSULE_HALF_HEIGHT = 0.4
-export const CAPSULE_RADIUS = 0.3
+export const CAPSULE_HALF_HEIGHT = 0.7
+export const CAPSULE_RADIUS = 0.6
 
 export class PhysicsWorld {
   world: RAPIER.World

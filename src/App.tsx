@@ -7,6 +7,7 @@ import { Player } from './components/Player.tsx'
 import { CameraController } from './components/CameraController.tsx'
 import { PhysicsDebug } from './components/PhysicsDebug.tsx'
 import { ThermalDebug } from './components/ThermalDebug.tsx'
+import { HUD } from './components/HUD.tsx'
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <ThermalDebug />
         </Scene>
       </Engine>
+      <HUD />
     </div>
   )
 }

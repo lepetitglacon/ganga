@@ -2,6 +2,11 @@ import { useEffect, useRef } from 'react'
 import { useScene, useBeforeRender } from 'react-babylonjs'
 import { ArcRotateCamera, UniversalCamera, Vector3, Scalar } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
+import { getTerrainHeight } from '@/game/terrain.ts'
+
+// Keep the camera at least this many meters above the terrain at its own
+// (x, z), so it never clips underground when orbiting low.
+const CAMERA_GROUND_MARGIN = 2
 
 const MOUSE_SENSITIVITY = 0.002
 // Near-full vertical orbit; epsilons avoid gimbal lock at the poles.
@@ -21,7 +26,7 @@ const SPEED_FOR_FULL_BOOST = 28 // m/s
 
 // Camera distance: wider on the ground (third-person-walk feel), closer in
 // flight where the bird drives the framing. Speed adds extra pull-back.
-const RADIUS_GROUNDED = 14
+const RADIUS_GROUNDED = 60
 const RADIUS_FLYING_BASE = 8
 const RADIUS_PER_SPEED = 0.45 // radius += speed * this
 const RADIUS_MAX = 32
@@ -136,13 +141,35 @@ export const CameraController = () => {
     const mesh = gameStore.mesh
     if (!cam || gameStore.camMode !== 'third') return
 
+    const now = performance.now()
+    const dt = Math.min((now - lastTimeRef.current) / 1000, 0.05)
+    lastTimeRef.current = now
+
     // Apply mouse angles directly — camera owns its own rotation
     cam.alpha = gameStore.camAlpha
     cam.beta = gameStore.camBeta
 
-    const now = performance.now()
-    const dt = Math.min((now - lastTimeRef.current) / 1000, 0.05)
-    lastTimeRef.current = now
+    // Clamp beta so the camera never dips below the terrain. ArcRotate
+    // position (Babylon LH): target + radius*(cos(α)sin(β), cos(β), sin(α)sin(β)).
+    // Smaller β = camera higher above target.
+    {
+      const tgt = baseTargetRef.current
+      const a = cam.alpha
+      const b = cam.beta
+      const sb = Math.sin(b)
+      const camX = tgt.x + cam.radius * Math.cos(a) * sb
+      const camZ = tgt.z + cam.radius * Math.sin(a) * sb
+      const camY = tgt.y + cam.radius * Math.cos(b)
+      const minY = getTerrainHeight(camX, camZ) + CAMERA_GROUND_MARGIN
+      if (camY < minY) {
+        const cosNeeded = (minY - tgt.y) / cam.radius
+        if (cosNeeded < 1) {
+          const newBeta = Math.acos(Scalar.Clamp(cosNeeded, -1, 1))
+          cam.beta = newBeta
+          gameStore.camBeta = newBeta
+        }
+      }
+    }
 
     // --- Base target: follow physics body with lag ---
     const body = gameStore.physics?.playerBody
@@ -165,9 +192,9 @@ export const CameraController = () => {
       const v = body.linvel()
       speed = Math.hypot(v.x, v.y, v.z)
     }
-    const groundedBase = gameStore.birdMode === 'flying' ? RADIUS_FLYING_BASE : RADIUS_GROUNDED
+    const base = gameStore.birdMode === 'flying' ? RADIUS_FLYING_BASE : RADIUS_GROUNDED
     const targetRadius = Math.min(
-      groundedBase + speed * RADIUS_PER_SPEED,
+      base + speed * RADIUS_PER_SPEED,
       RADIUS_MAX
     )
     cam.radius += (targetRadius - cam.radius) * (1 - Math.exp(-RADIUS_LERP * dt))
