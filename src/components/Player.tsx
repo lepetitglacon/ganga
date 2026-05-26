@@ -26,6 +26,10 @@ const FLIGHT_HORIZON_BETA = Math.PI / 2
 
 const WALK_SPEED = 5
 const FLIGHT_SPEED = 14
+// Ground "skid" after landing or after WASD release. Constant linear
+// deceleration so the skid duration scales with the speed at touchdown:
+// at FLIGHT_SPEED the slide lasts ~4s; at WALK_SPEED it tapers in ~1.4s.
+const GROUND_DECEL = 3.6 // m/s² horizontal
 const FLAP_BOOST = 1.2 // +120% speed at peak
 const FLAP_DECAY = 0.55 // per-second exponential decay rate (slow)
 const FLAP_COOLDOWN = 0.5
@@ -243,12 +247,26 @@ export const Player = () => {
         if (keys.current.has('KeyA')) move.subtractInPlace(right)
         if (keys.current.has('KeyD')) move.addInPlace(right)
 
-        if (move.length() > 0) move.normalize()
         const linvel = body.linvel()
-        body.setLinvel(
-          { x: move.x * WALK_SPEED, y: linvel.y, z: move.z * WALK_SPEED },
-          true
-        )
+        if (move.length() > 0) {
+          move.normalize()
+          body.setLinvel(
+            { x: move.x * WALK_SPEED, y: linvel.y, z: move.z * WALK_SPEED },
+            true,
+          )
+        } else {
+          // No input: coast on inherited momentum (post-landing skid) with a
+          // constant linear deceleration. Lets gravity own the y axis.
+          const speed = Math.hypot(linvel.x, linvel.z)
+          if (speed > 0) {
+            const newSpeed = Math.max(0, speed - GROUND_DECEL * dt)
+            const scale = newSpeed / speed
+            body.setLinvel(
+              { x: linvel.x * scale, y: linvel.y, z: linvel.z * scale },
+              true,
+            )
+          }
+        }
       }
       // Passive takeoff: walked off an edge → switch to flying without the
       // scripted flap sequence. Gravity off, current velocity preserved.
@@ -339,7 +357,11 @@ export const Player = () => {
         flapBoostRef.current = 0
         flapCooldownRef.current = 0
         body.setGravityScale(1, true)
-        body.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        // Preserve full horizontal momentum at touchdown. Any cap here causes
+        // a discontinuous speed drop that the FOV (speed-driven) makes obvious.
+        // The grounded skid (GROUND_DECEL) bleeds the energy off smoothly.
+        const lv = body.linvel()
+        body.setLinvel({ x: lv.x, y: 0, z: lv.z }, true)
       }
     }
 
