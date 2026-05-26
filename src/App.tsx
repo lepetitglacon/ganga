@@ -6,6 +6,7 @@ import { Map } from './components/Map.tsx'
 import { Player } from './components/Player.tsx'
 import { CameraController } from './components/CameraController.tsx'
 import { PostProcess } from './components/PostProcess.tsx'
+import { Storm } from './components/Storm.tsx'
 import { PhysicsDebug } from './components/PhysicsDebug.tsx'
 import { ThermalDebug } from './components/ThermalDebug.tsx'
 import { HUD } from './components/HUD.tsx'
@@ -21,6 +22,7 @@ export default function App() {
           <CameraController />
           <PostProcess />
           <Player />
+          <Storm />
           <PhysicsDebug />
           <ThermalDebug />
         </Scene>

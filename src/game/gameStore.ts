@@ -1,5 +1,6 @@
 import type { ArcRotateCamera, ShadowGenerator, TrailMesh, TransformNode } from '@babylonjs/core'
 import type { PhysicsWorld } from './physics.ts'
+import type { StormConfig } from './storm.ts'
 
 export const gameStore = {
   mesh: null as TransformNode | null,
@@ -33,4 +34,10 @@ export const gameStore = {
   thermal: 0,
   speed: 0,
   flapCooldown: 0,
+  // Active sandstorms. Player reads these to apply forces; Storm component
+  // owns the lifecycle (mount/unmount registers and removes entries).
+  storms: [] as StormConfig[],
+  // Per-frame summary written by Player: max wall proximity across all storms.
+  // 0 = outside any storm wall, 1 = dead center of a wall. Used for fog/HUD.
+  stormProximity: 0,
 }

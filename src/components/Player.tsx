@@ -19,6 +19,7 @@ import { gameStore } from '@/game/gameStore.ts'
 import { useKeyboard } from '@/hooks/useKeyboard.ts'
 import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
 import { SUN_DIR } from '@/game/world.ts'
+import { applyStormForce, sampleStorm } from '@/game/storm.ts'
 
 // Horizon = level flight. camBeta is measured from +Y, so π/2 is horizontal.
 // Looking up (camBeta > π/2) climbs, looking down (camBeta < π/2) dives.
@@ -363,6 +364,27 @@ export const Player = () => {
         const lv = body.linvel()
         body.setLinvel({ x: lv.x, y: 0, z: lv.z }, true)
       }
+    }
+
+    // --- Sandstorm forces ---
+    // Inside the dense wall of any storm: tangential wind + small radial push
+    // outward. We add to whatever linvel the mode branches just wrote.
+    if (gameStore.storms.length > 0) {
+      const t = body.translation()
+      const lv = body.linvel()
+      const out = { x: lv.x, y: lv.y, z: lv.z }
+      let maxProx = 0
+      for (const storm of gameStore.storms) {
+        const s = sampleStorm(storm, t.x, t.y, t.z)
+        if (s.wallProximity > maxProx) maxProx = s.wallProximity
+        applyStormForce(storm, t.x, t.z, s, dt, out)
+      }
+      gameStore.stormProximity = maxProx
+      if (out.x !== lv.x || out.z !== lv.z) {
+        body.setLinvel(out, true)
+      }
+    } else {
+      gameStore.stormProximity = 0
     }
 
     const v = body.linvel()
