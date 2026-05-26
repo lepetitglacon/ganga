@@ -21,7 +21,6 @@ import { gameStore } from '@/game/gameStore.ts'
 import { useKeyboard } from '@/hooks/useKeyboard.ts'
 import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
 import { SUN_DIR } from '@/game/world.ts'
-import { terrainHeights } from '@/components/Terrain.tsx'
 
 // Horizon = level flight. camBeta is measured from +Y, so π/2 is horizontal.
 // Looking up (camBeta > π/2) climbs, looking down (camBeta < π/2) dives.
@@ -94,6 +93,12 @@ export const Player = () => {
     const setup = async () => {
       await initRapier()
       if (cancelled) return
+
+      // Map mounts Terrain only after place GLBs are loaded; wait for it.
+      while (!gameStore.terrainHeights) {
+        await new Promise((r) => setTimeout(r, 16))
+        if (cancelled) return
+      }
 
       const spawn = makeSpawn()
 
@@ -174,7 +179,7 @@ export const Player = () => {
       trailR.setEnabled(false)
       gameStore.trails = [trailL, trailR]
 
-      const physics = new PhysicsWorld(terrainHeights)
+      const physics = new PhysicsWorld(gameStore.terrainHeights!)
       physics.createPlayerBody(spawn.x, spawn.y, spawn.z)
       gameStore.physics = physics
       lastTimeRef.current = performance.now()

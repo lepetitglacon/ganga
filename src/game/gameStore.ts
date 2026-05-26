@@ -4,6 +4,7 @@ import type { PhysicsWorld } from './physics.ts'
 export const gameStore = {
   mesh: null as TransformNode | null,
   physics: null as PhysicsWorld | null,
+  terrainHeights: null as Float32Array | null,
   arcCam: null as ArcRotateCamera | null,
   shadowGenerator: null as ShadowGenerator | null,
   trails: [] as TrailMesh[],

@@ -2,7 +2,7 @@ import { Engine, Scene } from 'react-babylonjs'
 import { Color4 } from '@babylonjs/core'
 import { LightSetup } from './components/LightSetup.tsx'
 import { Environment } from './components/Environment.tsx'
-import { Terrain } from './components/Terrain.tsx'
+import { Map } from './components/Map.tsx'
 import { Player } from './components/Player.tsx'
 import { CameraController } from './components/CameraController.tsx'
 import { PhysicsDebug } from './components/PhysicsDebug.tsx'
@@ -16,7 +16,7 @@ export default function App() {
         <Scene clearColor={new Color4(0.96, 0.78, 0.58, 1)}>
           <LightSetup />
           <Environment />
-          <Terrain />
+          <Map />
           <CameraController />
           <Player />
           <PhysicsDebug />

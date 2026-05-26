@@ -1,6 +1,7 @@
 import { Vector3 } from '@babylonjs/core'
+import { applyPlaceFlattening } from './places.ts'
 
-export const TERRAIN_SIZE = 800
+export const TERRAIN_SIZE = 1600
 export const TERRAIN_SUBDIVISIONS = 192
 
 // Cheap hash-based pseudo-random in [0..1)
@@ -55,7 +56,8 @@ function heightAt(x: number, z: number): number {
   const wz = fbm((x + 137) * 0.004, (z + 53) * 0.004, 3, 0.5)
   const base = fbm(x * 0.00175 + wx * 3.0, z * 0.00175 + wz * 3.0, 5, 0.55)
   const ripples = (fbm(x * 0.18, z * 0.18, 2, 0.5) - 0.5) * 0.7
-  return (base - 0.5) * 150 + ripples
+  const h = (base - 0.5) * 150 + ripples
+  return applyPlaceFlattening(x, z, h)
 }
 
 export function getTerrainHeight(worldX: number, worldZ: number): number {

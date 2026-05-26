@@ -6,16 +6,16 @@ import {
   TERRAIN_SIZE,
   TERRAIN_SUBDIVISIONS,
 } from '@/game/terrain.ts'
-
-const heights = generateHeightData()
-
-export { heights as terrainHeights }
+import { gameStore } from '@/game/gameStore.ts'
 
 export const Terrain = () => {
   const scene = useScene()
 
   useEffect(() => {
     if (!scene) return
+
+    const heights = generateHeightData()
+    gameStore.terrainHeights = heights
 
     const N = TERRAIN_SUBDIVISIONS
     const S = TERRAIN_SIZE
@@ -64,7 +64,10 @@ export const Terrain = () => {
     mesh.material = mat
     mesh.receiveShadows = true
 
-    return () => mesh.dispose()
+    return () => {
+      mesh.dispose()
+      gameStore.terrainHeights = null
+    }
   }, [scene])
 
   return null
