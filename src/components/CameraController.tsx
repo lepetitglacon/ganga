@@ -196,7 +196,7 @@ export const CameraController = () => {
 
     // --- Base target: follow physics body with lag ---
     const body = gameStore.physics?.playerBody
-    const k = gameStore.birdMode === 'flying' ? FOLLOW_LAG_FLYING : FOLLOW_LAG_GROUNDED
+    const k = gameStore.birdMode !== 'grounded' ? FOLLOW_LAG_FLYING : FOLLOW_LAG_GROUNDED
     const tLag = 1 - Math.exp(-k * dt)
     if (body) {
       const bt = body.translation()
@@ -215,7 +215,7 @@ export const CameraController = () => {
       const v = body.linvel()
       speed = Math.hypot(v.x, v.y, v.z)
     }
-    const base = gameStore.birdMode === 'flying' ? RADIUS_FLYING_BASE : RADIUS_GROUNDED
+    const base = gameStore.birdMode !== 'grounded' ? RADIUS_FLYING_BASE : RADIUS_GROUNDED
     const targetRadius = Math.min(
       base + speed * RADIUS_PER_SPEED,
       RADIUS_MAX
@@ -238,7 +238,7 @@ export const CameraController = () => {
     const pitchRate = dt > 0 ? betaDelta / dt : 0
 
     // 2) Target bird position in NDC, clamped to corner box.
-    const leadActive = gameStore.birdMode === 'flying'
+    const leadActive = gameStore.birdMode !== 'grounded'
     const targetSx = leadActive
       ? Math.max(-SCREEN_MAX_X, Math.min(SCREEN_MAX_X, yawRate * SCREEN_YAW_GAIN))
       : 0

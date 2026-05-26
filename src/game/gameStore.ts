@@ -9,7 +9,11 @@ export const gameStore = {
   shadowGenerator: null as ShadowGenerator | null,
   trails: [] as TrailMesh[],
   camMode: 'third' as 'third' | 'first',
-  birdMode: 'grounded' as 'grounded' | 'flying',
+  birdMode: 'grounded' as 'grounded' | 'takingOff' | 'flying',
+  // Visual flare overlay on top of `flying`. Set when the predicted trajectory
+  // is about to intersect the ground — bird levels out and flaps. Player keeps
+  // full velocity control; clears as soon as the trajectory becomes safe again.
+  landingApproach: false,
   // Camera angles — source of truth for camera orientation, driven by mouse
   camAlpha: -Math.PI / 2,
   // π/2 = horizon → level flight when taking off

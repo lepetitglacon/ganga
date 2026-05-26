@@ -26,10 +26,28 @@ const FLIGHT_HORIZON_BETA = Math.PI / 2
 
 const WALK_SPEED = 5
 const FLIGHT_SPEED = 14
-const TAKEOFF_COOLDOWN = 0.5
 const FLAP_BOOST = 1.2 // +120% speed at peak
 const FLAP_DECAY = 0.55 // per-second exponential decay rate (slow)
 const FLAP_COOLDOWN = 0.5
+
+// Takeoff: scripted sequence of wing-beats to leave the ground.
+// Gravity is disabled and each flap punches y-velocity upward; after the
+// last flap we hand off to free flight.
+const TAKEOFF_FLAPS = 3
+const TAKEOFF_FLAP_INTERVAL = 0.22 // seconds between flaps
+const TAKEOFF_FLAP_IMPULSE = 5 // m/s added to y-vel per flap
+const TAKEOFF_FORWARD_SPEED = 4 // m/s initial forward drift during takeoff
+// Margin below which the bird is considered "on the ground" for state purposes.
+// Slightly larger than the landing margin so we don't flicker at edges.
+const GROUND_MARGIN_LEAVE = 1.0
+
+// Landing flare (visual overlay, NOT a state). We cast a ray along the
+// current velocity vector and check time-to-impact against terrain or any
+// static collider (buildings, places). The player keeps full velocity
+// control — pulling up makes the ray miss and the overlay clears on its own.
+const LANDING_ENTER_TIME = 0.6 // seconds to impact → flare on
+const LANDING_EXIT_TIME = 1.1 // no impact within this horizon → flare off (hysteresis)
+const LANDING_MIN_SPEED = 1.0 // m/s — below this, skip the ray (degenerate dir)
 
 // Thermal updraft tuning.
 // Thermals form over sun-facing slopes (warm rising air). We measure that
@@ -55,7 +73,8 @@ export const Player = () => {
   const scene = useScene()
   const keys = useKeyboard()
   const lastTimeRef = useRef(performance.now())
-  const takeoffCooldownRef = useRef(0)
+  const takeoffFlapsLeftRef = useRef(0)
+  const takeoffNextFlapRef = useRef(0)
   const prevYawRef = useRef(0)
   const bankRef = useRef(0)
   const flightTimeRef = useRef(0)
@@ -73,17 +92,16 @@ export const Player = () => {
       if (e.code !== 'Space') return
       e.preventDefault()
       if (gameStore.birdMode === 'grounded') {
-        gameStore.birdMode = 'flying'
-        takeoffCooldownRef.current = TAKEOFF_COOLDOWN
+        // Active takeoff: scripted 2–3 flaps before free flight kicks in.
+        gameStore.birdMode = 'takingOff'
+        takeoffFlapsLeftRef.current = TAKEOFF_FLAPS
+        takeoffNextFlapRef.current = 0 // fire first flap immediately on next frame
         const body = gameStore.physics?.playerBody
-        if (body) {
-          // Disable gravity so vertical input is the sole driver of climb/dive.
-          body.setGravityScale(0, true)
-          body.setLinvel({ x: 0, y: 6, z: 0 }, true)
-        }
+        if (body) body.setGravityScale(0, true)
       } else if (gameStore.birdMode === 'flying' && flapCooldownRef.current <= 0) {
         flapBoostRef.current = FLAP_BOOST
         flapCooldownRef.current = FLAP_COOLDOWN
+        flyAnimRef.current?.start(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -206,74 +224,122 @@ export const Player = () => {
     const yaw = -gameStore.birdAlpha - Math.PI / 2
     gameStore.birdYaw = yaw
 
+    // pitch drives the flight velocity (player control). visualPitch drives the
+    // mesh orientation — flattens during landing flare while velocity stays free.
     const pitch = gameStore.birdMode === 'flying'
       ? gameStore.birdBeta - FLIGHT_HORIZON_BETA
       : 0
-    gameStore.birdPitch = pitch
+    const visualPitch = gameStore.landingApproach ? 0 : pitch
+    gameStore.birdPitch = visualPitch
 
-    if (gameStore.birdMode === 'grounded' && gameStore.camMode === 'third') {
-      // fwd = direction the bird is heading, flattened
-      const fwd = new Vector3(-Math.cos(gameStore.birdAlpha), 0, -Math.sin(gameStore.birdAlpha))
-      const right = new Vector3(-Math.sin(gameStore.birdAlpha), 0, Math.cos(gameStore.birdAlpha))
-      const move = Vector3.Zero()
+    if (gameStore.birdMode === 'grounded') {
+      if (gameStore.camMode === 'third') {
+        const fwd = new Vector3(-Math.cos(gameStore.birdAlpha), 0, -Math.sin(gameStore.birdAlpha))
+        const right = new Vector3(-Math.sin(gameStore.birdAlpha), 0, Math.cos(gameStore.birdAlpha))
+        const move = Vector3.Zero()
 
-      if (keys.current.has('KeyW')) move.addInPlace(fwd)
-      if (keys.current.has('KeyS')) move.subtractInPlace(fwd)
-      if (keys.current.has('KeyA')) move.subtractInPlace(right)
-      if (keys.current.has('KeyD')) move.addInPlace(right)
+        if (keys.current.has('KeyW')) move.addInPlace(fwd)
+        if (keys.current.has('KeyS')) move.subtractInPlace(fwd)
+        if (keys.current.has('KeyA')) move.subtractInPlace(right)
+        if (keys.current.has('KeyD')) move.addInPlace(right)
 
-      if (move.length() > 0) move.normalize()
-      const linvel = body.linvel()
-      body.setLinvel(
-        { x: move.x * WALK_SPEED, y: linvel.y, z: move.z * WALK_SPEED },
-        true
-      )
+        if (move.length() > 0) move.normalize()
+        const linvel = body.linvel()
+        body.setLinvel(
+          { x: move.x * WALK_SPEED, y: linvel.y, z: move.z * WALK_SPEED },
+          true
+        )
+      }
+      // Passive takeoff: walked off an edge → switch to flying without the
+      // scripted flap sequence. Gravity off, current velocity preserved.
+      if (!physics.isNearGround(GROUND_MARGIN_LEAVE)) {
+        gameStore.birdMode = 'flying'
+        body.setGravityScale(0, true)
+      }
+    }
+
+    if (gameStore.birdMode === 'takingOff') {
+      takeoffNextFlapRef.current -= dt
+      if (takeoffNextFlapRef.current <= 0 && takeoffFlapsLeftRef.current > 0) {
+        const lv = body.linvel()
+        body.setLinvel(
+          {
+            x: Math.sin(yaw) * TAKEOFF_FORWARD_SPEED,
+            y: Math.max(lv.y, 0) + TAKEOFF_FLAP_IMPULSE,
+            z: Math.cos(yaw) * TAKEOFF_FORWARD_SPEED,
+          },
+          true
+        )
+        flyAnimRef.current?.start(false)
+        takeoffFlapsLeftRef.current -= 1
+        takeoffNextFlapRef.current = TAKEOFF_FLAP_INTERVAL
+      }
+      if (takeoffFlapsLeftRef.current <= 0 && takeoffNextFlapRef.current <= 0) {
+        gameStore.birdMode = 'flying'
+      }
     }
 
     if (gameStore.birdMode === 'flying') {
       if (flapCooldownRef.current > 0) flapCooldownRef.current -= dt
       flapBoostRef.current *= Math.exp(-FLAP_DECAY * dt)
-      if (takeoffCooldownRef.current > 0) {
-        takeoffCooldownRef.current -= dt
-      } else {
-        // --- Thermal updraft ---
-        // Sample the dune's slope under the bird. Sun-facing slopes radiate
-        // warmth → rising air. Only slopes that are both (a) tilted enough
-        // and (b) oriented toward the sun produce a thermal.
-        const t = body.translation()
-        const terrainY = getTerrainHeight(t.x, t.z)
-        const altitude = t.y - terrainY
-        let thermal = 0
-        if (altitude > 0 && altitude < THERMAL_MAX_ALTITUDE) {
-          const normal = getTerrainNormal(t.x, t.z, 3)
-          const facing = Vector3.Dot(normal, SUN_DIR) // -1..1
-          const slope = 1 - normal.y // 0 = flat, 1 = vertical
-          if (facing > 0 && slope > THERMAL_SLOPE_THRESHOLD) {
-            const altFalloff = 1 - altitude / THERMAL_MAX_ALTITUDE
-            thermal = facing * slope * altFalloff
-          }
-        }
-        gameStore.thermal = thermal
 
-        const speedMul = 1 + thermal * THERMAL_SPEED_BOOST + flapBoostRef.current
-        const lift = thermal * THERMAL_LIFT
-        body.setLinvel(
-          {
-            x: Math.sin(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
-            y: Math.sin(pitch) * FLIGHT_SPEED * speedMul + lift,
-            z: Math.cos(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
-          },
-          true
-        )
-
-        if (physics.isNearGround()) {
-          gameStore.birdMode = 'grounded'
-          gameStore.thermal = 0
-          flapBoostRef.current = 0
-          flapCooldownRef.current = 0
-          body.setGravityScale(1, true)
-          body.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      // --- Thermal updraft ---
+      // Sample the dune's slope under the bird. Sun-facing slopes radiate
+      // warmth → rising air. Only slopes that are both (a) tilted enough
+      // and (b) oriented toward the sun produce a thermal.
+      const t = body.translation()
+      const terrainY = getTerrainHeight(t.x, t.z)
+      const altitude = t.y - terrainY
+      let thermal = 0
+      if (altitude > 0 && altitude < THERMAL_MAX_ALTITUDE) {
+        const normal = getTerrainNormal(t.x, t.z, 3)
+        const facing = Vector3.Dot(normal, SUN_DIR) // -1..1
+        const slope = 1 - normal.y // 0 = flat, 1 = vertical
+        if (facing > 0 && slope > THERMAL_SLOPE_THRESHOLD) {
+          const altFalloff = 1 - altitude / THERMAL_MAX_ALTITUDE
+          thermal = facing * slope * altFalloff
         }
+      }
+      gameStore.thermal = thermal
+
+      const speedMul = 1 + thermal * THERMAL_SPEED_BOOST + flapBoostRef.current
+      const lift = thermal * THERMAL_LIFT
+      body.setLinvel(
+        {
+          x: Math.sin(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
+          y: Math.sin(pitch) * FLIGHT_SPEED * speedMul + lift,
+          z: Math.cos(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
+        },
+        true
+      )
+
+      // Landing flare overlay: cast a ray along motion and react to imminent
+      // impact (terrain, buildings, place trimeshes — anything with a collider).
+      const lvNow = body.linvel()
+      const tNow = body.translation()
+      const speedH = Math.hypot(lvNow.x, lvNow.y, lvNow.z)
+      if (speedH > LANDING_MIN_SPEED) {
+        const dir = { x: lvNow.x / speedH, y: lvNow.y / speedH, z: lvNow.z / speedH }
+        const enterDist = speedH * LANDING_ENTER_TIME
+        const exitDist = speedH * LANDING_EXIT_TIME
+        const toi = physics.raycast(tNow, dir, exitDist)
+        if (!gameStore.landingApproach && toi !== null && toi <= enterDist) {
+          gameStore.landingApproach = true
+          flyAnimRef.current?.start(true)
+        } else if (gameStore.landingApproach && toi === null) {
+          gameStore.landingApproach = false
+          flyAnimRef.current?.stop()
+        }
+      }
+
+      if (physics.isNearGround()) {
+        gameStore.birdMode = 'grounded'
+        gameStore.landingApproach = false
+        gameStore.thermal = 0
+        flapBoostRef.current = 0
+        flapCooldownRef.current = 0
+        body.setGravityScale(1, true)
+        body.setLinvel({ x: 0, y: 0, z: 0 }, true)
       }
     }
 
@@ -283,10 +349,12 @@ export const Player = () => {
 
     // Animation transitions
     if (gameStore.birdMode !== prevBirdModeRef.current) {
-      if (gameStore.birdMode === 'flying') {
+      const inAir = gameStore.birdMode !== 'grounded'
+      const wasInAir = prevBirdModeRef.current !== 'grounded'
+      if (inAir && !wasInAir) {
         idleAnimRef.current?.stop()
         flyAnimRef.current?.start(false)
-      } else {
+      } else if (!inAir && wasInAir) {
         flyAnimRef.current?.stop()
         idleAnimRef.current?.start(true)
       }
@@ -296,7 +364,7 @@ export const Player = () => {
     physics.step(dt)
 
     // Feather-style float: bank into turns + gentle vertical bob
-    const isFlying = gameStore.birdMode === 'flying'
+    const isFlying = gameStore.birdMode === 'flying' && !gameStore.landingApproach
     let yawDelta = yaw - prevYawRef.current
     // shortest-arc
     if (yawDelta > Math.PI) yawDelta -= 2 * Math.PI
@@ -321,7 +389,7 @@ export const Player = () => {
     // Build orientation from yaw + pitch + roll via quaternion to avoid
     // Euler-order ambiguity. The GLB loader already applies a 180° flip on
     // the imported root, so the carrier uses yaw directly.
-    const target = Quaternion.RotationYawPitchRoll(yaw, -pitch, bankRef.current)
+    const target = Quaternion.RotationYawPitchRoll(yaw, -visualPitch, bankRef.current)
     if (!mesh.rotationQuaternion) mesh.rotationQuaternion = target.clone()
     else Quaternion.SlerpToRef(mesh.rotationQuaternion, target, 1 - Math.exp(-ORIENT_SMOOTHING * dt), mesh.rotationQuaternion)
 

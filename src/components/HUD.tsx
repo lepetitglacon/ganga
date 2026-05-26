@@ -11,7 +11,7 @@ export const HUD = () => {
     const tick = () => {
       setSpeed(gameStore.speed)
       setCooldown(gameStore.flapCooldown)
-      setFlying(gameStore.birdMode === 'flying')
+      setFlying(gameStore.birdMode !== 'grounded')
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)

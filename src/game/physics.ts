@@ -43,6 +43,27 @@ export class PhysicsWorld {
     )
   }
 
+  // Cast a ray from `origin` along (unit) `dir`. Returns the hit distance
+  // (== time-of-impact for a unit dir) or null if nothing was hit within
+  // maxDist. Filters out the player so we don't self-hit.
+  raycast(
+    origin: { x: number; y: number; z: number },
+    dir: { x: number; y: number; z: number },
+    maxDist: number,
+  ): number | null {
+    const ray = new RAPIER.Ray(origin, dir)
+    const hit = this.world.castRay(
+      ray,
+      maxDist,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      this.playerBody ?? undefined,
+    )
+    return hit ? hit.timeOfImpact : null
+  }
+
   isNearGround(margin = 0.6): boolean {
     if (!this.playerBody) return false
     const t = this.playerBody.translation()
