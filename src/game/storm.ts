@@ -135,7 +135,13 @@ export function applyStormForce(
   const tz = -rx
   // smoothstep for soft entry/exit at the wall edges
   const s = sample.wallProximity * sample.wallProximity * (3 - 2 * sample.wallProximity)
-  const wind = storm.windSpeed * s * dt
+  // Asymmetric tangent force: when the bird is fighting the swirl (negative
+  // tangent velocity), the wind hits ~3× harder so it brakes fast. When the
+  // bird already rides with the swirl, the boost is gentler — the storm
+  // herds you into its rotation instead of catapulting you indefinitely.
+  const velTan = outVel.x * tx + outVel.z * tz
+  const tangentMult = velTan < 0 ? 3.0 : 10
+  const wind = storm.windSpeed * s * dt * tangentMult
   const push = storm.outwardAccel * s * dt
   outVel.x += tx * wind + rx * push
   outVel.z += tz * wind + rz * push

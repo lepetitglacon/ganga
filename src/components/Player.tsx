@@ -25,6 +25,15 @@ import { applyStormForce, sampleStorm } from '@/game/storm.ts'
 // Looking up (camBeta > π/2) climbs, looking down (camBeta < π/2) dives.
 const FLIGHT_HORIZON_BETA = Math.PI / 2
 
+// Fixed-timestep simulation. Everything that touches physics or accumulates
+// over time (storm forces, skid deceleration, flap decay, takeoff timer)
+// runs in 1/60s chunks driven by an accumulator, so behavior matches across
+// 30/60/144 Hz framerates. Cosmetic per-frame work (mesh slerp, banking,
+// trails) still runs once per render with the real frame delta.
+const FIXED_DT = 1 / 60
+// Cap sub-steps per frame to avoid the "spiral of death" if a frame stalls.
+const MAX_SUB_STEPS = 5
+
 const WALK_SPEED = 5
 const FLIGHT_SPEED = 14
 // Ground "skid" after landing or after WASD release. Constant linear
@@ -78,6 +87,7 @@ export const Player = () => {
   const scene = useScene()
   const keys = useKeyboard()
   const lastTimeRef = useRef(performance.now())
+  const accRef = useRef(0)
   const takeoffFlapsLeftRef = useRef(0)
   const takeoffNextFlapRef = useRef(0)
   const prevYawRef = useRef(0)
@@ -220,8 +230,9 @@ export const Player = () => {
     if (!mesh || !physics?.playerBody) return
 
     const now = performance.now()
-    const dt = Math.min((now - lastTimeRef.current) / 1000, 0.05)
+    const frameDt = Math.min((now - lastTimeRef.current) / 1000, 0.25)
     lastTimeRef.current = now
+    accRef.current += frameDt
 
     const body = physics.playerBody
 
@@ -236,6 +247,12 @@ export const Player = () => {
       : 0
     const visualPitch = gameStore.landingApproach ? 0 : pitch
     gameStore.birdPitch = visualPitch
+
+    let subSteps = 0
+    while (accRef.current >= FIXED_DT && subSteps < MAX_SUB_STEPS) {
+      const dt = FIXED_DT
+      accRef.current -= FIXED_DT
+      subSteps++
 
     if (gameStore.birdMode === 'grounded') {
       if (gameStore.camMode === 'third') {
@@ -406,6 +423,10 @@ export const Player = () => {
     }
 
     physics.step(dt)
+    } // end fixed-step loop
+    // If we hit the sub-step cap, drop leftover accumulator so the spiral
+    // doesn't compound across slow frames.
+    if (subSteps >= MAX_SUB_STEPS) accRef.current = 0
 
     // Feather-style float: bank into turns + gentle vertical bob
     const isFlying = gameStore.birdMode === 'flying' && !gameStore.landingApproach
@@ -414,14 +435,14 @@ export const Player = () => {
     if (yawDelta > Math.PI) yawDelta -= 2 * Math.PI
     else if (yawDelta < -Math.PI) yawDelta += 2 * Math.PI
     prevYawRef.current = yaw
-    const yawRate = dt > 0 ? yawDelta / dt : 0
+    const yawRate = frameDt > 0 ? yawDelta / frameDt : 0
     const targetBank = isFlying
       ? Math.max(-MAX_BANK, Math.min(MAX_BANK, -yawRate * BANK_PER_YAW_RATE))
       : 0
-    const bankBlend = 1 - Math.exp(-ORIENT_SMOOTHING * dt)
+    const bankBlend = 1 - Math.exp(-ORIENT_SMOOTHING * frameDt)
     bankRef.current += (targetBank - bankRef.current) * bankBlend
 
-    if (isFlying) flightTimeRef.current += dt
+    if (isFlying) flightTimeRef.current += frameDt
     else flightTimeRef.current = 0
     const bob = isFlying
       ? Math.sin(flightTimeRef.current * Math.PI * 2 * BOB_FREQUENCY) * BOB_AMPLITUDE
@@ -435,7 +456,7 @@ export const Player = () => {
     // the imported root, so the carrier uses yaw directly.
     const target = Quaternion.RotationYawPitchRoll(yaw, -visualPitch, bankRef.current)
     if (!mesh.rotationQuaternion) mesh.rotationQuaternion = target.clone()
-    else Quaternion.SlerpToRef(mesh.rotationQuaternion, target, 1 - Math.exp(-ORIENT_SMOOTHING * dt), mesh.rotationQuaternion)
+    else Quaternion.SlerpToRef(mesh.rotationQuaternion, target, 1 - Math.exp(-ORIENT_SMOOTHING * frameDt), mesh.rotationQuaternion)
 
     const shouldTrail = gameStore.birdMode === 'flying'
     for (const trail of gameStore.trails) {
