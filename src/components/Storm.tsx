@@ -125,7 +125,10 @@ void main(void) {
   float topFade = 1.0 - smoothstep(topFadeStart, 1.0, y01);
 
   float alpha = n * edge * bottomFade * topFade * patchOpacity;
-  if (alpha < 0.01) discard;
+  // Discard aggressively so the depth buffer only records solid parts of a
+  // patch. Without this, faint feathered edges write depth and create hard
+  // halos around every quad.
+  if (alpha < 0.25) discard;
   // Per-patch tint variation: each patch is a mix of tintA / tintB by its
   // instance hash, with a brightness factor in [brightnessMin, brightnessMax].
   vec3 patchTint = mix(tintA, tintB, vInstanceSeed);
@@ -189,7 +192,10 @@ export const Storm = () => {
         const px = cos * r
         const py = relY
         const pz = sin * r
-        const yaw = Math.atan2(cos, sin)
+        // +π flips each patch so its front face points radially OUTWARD.
+        // The default plane has its front along +Z, and our base rotation
+        // pointed +Z toward the cone axis instead of away from it.
+        const yaw = Math.atan2(cos, sin) + Math.PI
         const rot = Quaternion.FromEulerAngles(0, yaw, 0)
         Matrix.ComposeToRef(tmpScale, rot, new Vector3(px, py, pz), tmpMat)
         tmpMat.copyToArray(buf, i * 16)
@@ -234,7 +240,13 @@ export const Storm = () => {
           ],
         },
       )
-      mat.backFaceCulling = false
+      // Two-pass cone:
+      //   - This material/mesh = FRONT pass. Backface culling keeps only the
+      //     half of the cone whose patch normals face the camera (front half).
+      //   - A cloned mesh with flipped faces + dimmed material = BACK pass,
+      //     drawn first and faintly so the front facade reads as solid while
+      //     the silhouette of the far side bleeds through gaps.
+      mat.backFaceCulling = true
       mat.needAlphaBlending = () => true
       mat.alpha = 0.999 // ensure transparency path
       mat.setColor3('sandColor', storm.sandColor)
@@ -252,13 +264,36 @@ export const Storm = () => {
       mat.setVector3('sunDirection', SUN_DIR)
       mat.setFloat('shadeStrength', 0.55)
       plane.material = mat
-      // Stay in the default rendering group so we share the depth buffer with
-      // terrain/buildings. Babylon draws opaque first then alpha-blended, so
-      // the storm composites correctly over the scene instead of overdrawing it.
-      plane.renderingGroupId = 0
-      // No depth write: many overlapping transparent quads in the wall would
-      // otherwise clip each other into hard edges.
-      mat.disableDepthWrite = true
+      mat.disableDepthWrite = false
+
+      // --- BACK PASS ---
+      // Clone the plane and flip its winding. With backFaceCulling still on,
+      // the clone renders the half of the cone the original mesh hides. A
+      // separate material instance lets us dim its opacity so the front pass
+      // stays visually dominant.
+      const planeBack = plane.clone('stormQuadBack')!
+      // Clones share geometry by default — flipping faces here would also flip
+      // the original. Detach the geometry first so the flip is isolated.
+      planeBack.makeGeometryUnique()
+      planeBack.flipFaces(true)
+      planeBack.thinInstanceSetBuffer('matrix', buf, 16, true)
+      const matBack = mat.clone('stormMatBack') as ShaderMaterial
+      matBack.backFaceCulling = true
+      matBack.disableDepthWrite = false
+      // Dim the back pass — silhouette is enough, we don't want it competing
+      // with the front patches in brightness.
+      matBack.setFloat('patchOpacity', storm.patchOpacity * 0.45)
+      matBack.setFloat('brightnessMin', storm.brightnessMin * 0.55)
+      matBack.setFloat('brightnessMax', storm.brightnessMax * 0.55)
+      planeBack.material = matBack
+
+      // Render order: back pass first (group 0), front pass on top (group 1).
+      // Disable auto-clear-depth on group 1 so the front pass can depth-test
+      // against the back pass's depth (otherwise group 1 starts with a fresh
+      // depth buffer and the layering gains nothing).
+      planeBack.renderingGroupId = 0
+      plane.renderingGroupId = 1
+      scene.setRenderingAutoClearDepthStencil(1, false, true, true)
 
       let t0 = performance.now()
 
@@ -266,22 +301,32 @@ export const Storm = () => {
         const now = performance.now()
         const t = (now - t0) / 1000
         mat.setFloat('time', t)
+        matBack.setFloat('time', t)
         // Swirl: rotate the whole cone around Y. Cheap visual that sells motion.
         root.rotation.y = t * storm.windAngularSpeed
-        // Sync scene fog into the shader (Environment owns the source of truth).
+        // Sync scene fog into both shaders (Environment owns the baseline).
+        const cam = scene.activeCamera
         mat.setColor3('fogColor', scene.fogColor)
         mat.setFloat('fogDensity', scene.fogDensity)
-        const cam = scene.activeCamera
-        if (cam) mat.setVector3('cameraPosition', cam.globalPosition)
+        matBack.setColor3('fogColor', scene.fogColor)
+        matBack.setFloat('fogDensity', scene.fogDensity)
+        if (cam) {
+          mat.setVector3('cameraPosition', cam.globalPosition)
+          matBack.setVector3('cameraPosition', cam.globalPosition)
+        }
       })
 
       cleanup = () => {
         scene.onBeforeRenderObservable.remove(obs)
         const idx = gameStore.storms.indexOf(storm)
         if (idx >= 0) gameStore.storms.splice(idx, 1)
+        planeBack.dispose()
+        matBack.dispose()
         plane.dispose()
         mat.dispose()
         root.dispose()
+        // Restore default group-1 auto-clear behavior.
+        scene.setRenderingAutoClearDepthStencil(1, true, true, true)
       }
     }
 
