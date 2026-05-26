@@ -10,11 +10,18 @@ export const gameStore = {
   trails: [] as TrailMesh[],
   camMode: 'third' as 'third' | 'first',
   birdMode: 'grounded' as 'grounded' | 'flying',
-  // Camera angles — source of truth, driven by mouse
+  // Camera angles — source of truth for camera orientation, driven by mouse
   camAlpha: -Math.PI / 2,
   // π/2 = horizon → level flight when taking off
   camBeta: Math.PI / 2,
-  // Derived each frame from camera angles
+  // Bird heading angles. Track cam* unless free-look (Shift) decouples them.
+  birdAlpha: -Math.PI / 2,
+  birdBeta: Math.PI / 2,
+  // Hold Shift to look around without turning the bird.
+  freeLook: false,
+  // True while the camera is lerping back behind the bird after free-look.
+  recentering: false,
+  // Derived each frame from bird angles
   birdYaw: 0,
   birdPitch: 0,
   // 0..1 — current thermal strength under the bird (sun-facing slope updraft).

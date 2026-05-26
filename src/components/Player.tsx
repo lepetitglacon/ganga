@@ -12,8 +12,6 @@ import {
 } from '@babylonjs/core'
 import '@babylonjs/loaders/glTF'
 import {
-  initRapier,
-  PhysicsWorld,
   CAPSULE_HALF_HEIGHT,
   CAPSULE_RADIUS,
 } from '@/game/physics.ts'
@@ -91,11 +89,9 @@ export const Player = () => {
     window.addEventListener('keydown', onKeyDown)
 
     const setup = async () => {
-      await initRapier()
-      if (cancelled) return
-
-      // Map mounts Terrain only after place GLBs are loaded; wait for it.
-      while (!gameStore.terrainHeights) {
+      // Map owns the physics world: it waits for terrain heights, then
+      // creates PhysicsWorld and bakes place trimeshes. Wait for it.
+      while (!gameStore.physics) {
         await new Promise((r) => setTimeout(r, 16))
         if (cancelled) return
       }
@@ -179,9 +175,7 @@ export const Player = () => {
       trailR.setEnabled(false)
       gameStore.trails = [trailL, trailR]
 
-      const physics = new PhysicsWorld(gameStore.terrainHeights!)
-      physics.createPlayerBody(spawn.x, spawn.y, spawn.z)
-      gameStore.physics = physics
+      gameStore.physics.createPlayerBody(spawn.x, spawn.y, spawn.z)
       lastTimeRef.current = performance.now()
     }
 
@@ -194,8 +188,6 @@ export const Player = () => {
       gameStore.trails = []
       gameStore.mesh?.dispose()
       gameStore.mesh = null
-      gameStore.physics?.dispose()
-      gameStore.physics = null
     }
   }, [scene])
 
@@ -210,19 +202,19 @@ export const Player = () => {
 
     const body = physics.playerBody
 
-    // Derive bird direction from camera — camera is the source of truth
-    const yaw = -gameStore.camAlpha - Math.PI / 2
+    // Derive bird direction from its own heading (decoupled from cam during free-look)
+    const yaw = -gameStore.birdAlpha - Math.PI / 2
     gameStore.birdYaw = yaw
 
     const pitch = gameStore.birdMode === 'flying'
-      ? gameStore.camBeta - FLIGHT_HORIZON_BETA
+      ? gameStore.birdBeta - FLIGHT_HORIZON_BETA
       : 0
     gameStore.birdPitch = pitch
 
     if (gameStore.birdMode === 'grounded' && gameStore.camMode === 'third') {
-      // fwd = direction camera is looking, flattened
-      const fwd = new Vector3(-Math.cos(gameStore.camAlpha), 0, -Math.sin(gameStore.camAlpha))
-      const right = new Vector3(-Math.sin(gameStore.camAlpha), 0, Math.cos(gameStore.camAlpha))
+      // fwd = direction the bird is heading, flattened
+      const fwd = new Vector3(-Math.cos(gameStore.birdAlpha), 0, -Math.sin(gameStore.birdAlpha))
+      const right = new Vector3(-Math.sin(gameStore.birdAlpha), 0, Math.cos(gameStore.birdAlpha))
       const move = Vector3.Zero()
 
       if (keys.current.has('KeyW')) move.addInPlace(fwd)

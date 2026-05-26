@@ -46,6 +46,10 @@ const SCREEN_MAX_X = 0.72 // 0..1 — clamp before the absolute edge
 const SCREEN_MAX_Y = 0.6
 const LEAD_LERP = 4.5
 
+// How fast the camera lerps back behind the bird after free-look is released.
+const RECENTER_LERP = 6
+const RECENTER_EPS = 0.005
+
 export const CameraController = () => {
   const scene = useScene()
   const lastTimeRef = useRef(performance.now())
@@ -103,10 +107,25 @@ export const CameraController = () => {
         BETA_MIN,
         BETA_MAX
       )
+      // Outside of free-look the bird's heading mirrors the camera. Mouse
+      // input also cancels any in-progress recenter — the player is steering
+      // again, so the camera shouldn't be pulled back to a stale target.
+      if (!gameStore.freeLook) {
+        gameStore.birdAlpha = gameStore.camAlpha
+        gameStore.birdBeta = gameStore.camBeta
+        gameStore.recentering = false
+      }
     }
     document.addEventListener('mousemove', onMouseMove)
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        if (!gameStore.freeLook) {
+          gameStore.freeLook = true
+          gameStore.recentering = false
+        }
+        return
+      }
       if (!e.ctrlKey || e.code !== 'KeyC') return
       e.preventDefault()
       if (gameStore.camMode === 'third') {
@@ -126,10 +145,20 @@ export const CameraController = () => {
     }
     window.addEventListener('keydown', onKeyDown)
 
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return
+      if (gameStore.freeLook) {
+        gameStore.freeLook = false
+        gameStore.recentering = true
+      }
+    }
+    window.addEventListener('keyup', onKeyUp)
+
     return () => {
       canvas.removeEventListener('click', requestLock)
       document.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
       arcCam.dispose()
       freeCam.dispose()
       gameStore.arcCam = null
@@ -145,31 +174,25 @@ export const CameraController = () => {
     const dt = Math.min((now - lastTimeRef.current) / 1000, 0.05)
     lastTimeRef.current = now
 
+    // Recenter the camera back behind the bird after free-look released.
+    if (gameStore.recentering && !gameStore.freeLook) {
+      const t = 1 - Math.exp(-RECENTER_LERP * dt)
+      let da = gameStore.birdAlpha - gameStore.camAlpha
+      if (da > Math.PI) da -= 2 * Math.PI
+      else if (da < -Math.PI) da += 2 * Math.PI
+      const db = gameStore.birdBeta - gameStore.camBeta
+      gameStore.camAlpha += da * t
+      gameStore.camBeta += db * t
+      if (Math.abs(da) < RECENTER_EPS && Math.abs(db) < RECENTER_EPS) {
+        gameStore.camAlpha = gameStore.birdAlpha
+        gameStore.camBeta = gameStore.birdBeta
+        gameStore.recentering = false
+      }
+    }
+
     // Apply mouse angles directly — camera owns its own rotation
     cam.alpha = gameStore.camAlpha
     cam.beta = gameStore.camBeta
-
-    // Clamp beta so the camera never dips below the terrain. ArcRotate
-    // position (Babylon LH): target + radius*(cos(α)sin(β), cos(β), sin(α)sin(β)).
-    // Smaller β = camera higher above target.
-    {
-      const tgt = baseTargetRef.current
-      const a = cam.alpha
-      const b = cam.beta
-      const sb = Math.sin(b)
-      const camX = tgt.x + cam.radius * Math.cos(a) * sb
-      const camZ = tgt.z + cam.radius * Math.sin(a) * sb
-      const camY = tgt.y + cam.radius * Math.cos(b)
-      const minY = getTerrainHeight(camX, camZ) + CAMERA_GROUND_MARGIN
-      if (camY < minY) {
-        const cosNeeded = (minY - tgt.y) / cam.radius
-        if (cosNeeded < 1) {
-          const newBeta = Math.acos(Scalar.Clamp(cosNeeded, -1, 1))
-          cam.beta = newBeta
-          gameStore.camBeta = newBeta
-        }
-      }
-    }
 
     // --- Base target: follow physics body with lag ---
     const body = gameStore.physics?.playerBody
@@ -245,9 +268,23 @@ export const CameraController = () => {
     const offR = sx * cam.radius * halfTan * aspect
     const offU = sy * cam.radius * halfTan
 
+    // Lift the camera+target pair vertically when the orbit would dip below
+    // the terrain. Moving both by the same Δy preserves the look direction
+    // (so the player can still aim straight up) while sliding the camera
+    // along the ground instead of clamping pitch.
+    let liftY = 0
+    {
+      const tgt = baseTargetRef.current
+      const camX = tgt.x + cam.radius * ca * sb
+      const camZ = tgt.z + cam.radius * sa * sb
+      const camY = tgt.y + cam.radius * cb
+      const minY = getTerrainHeight(camX, camZ) + CAMERA_GROUND_MARGIN
+      if (camY < minY) liftY = minY - camY
+    }
+
     cam.target.set(
       baseTargetRef.current.x - rightX * offR - upX * offU,
-      baseTargetRef.current.y - upY * offU,
+      baseTargetRef.current.y - upY * offU + liftY,
       baseTargetRef.current.z - rightZ * offR - upZ * offU,
     )
   })

@@ -27,6 +27,11 @@ export class PhysicsWorld {
     )
   }
 
+  addStaticTrimesh(vertices: Float32Array, indices: Uint32Array): void {
+    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed())
+    this.world.createCollider(RAPIER.ColliderDesc.trimesh(vertices, indices), body)
+  }
+
   createPlayerBody(x: number, y: number, z: number): void {
     const desc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, y, z)

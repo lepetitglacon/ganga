@@ -1,9 +1,21 @@
 import { useEffect, useState } from 'react'
 import { useScene } from 'react-babylonjs'
-import { SceneLoader, TransformNode } from '@babylonjs/core'
+import {
+  SceneLoader,
+  TransformNode,
+  AbstractMesh,
+  VertexBuffer,
+  Vector3,
+} from '@babylonjs/core'
 import { Terrain } from './Terrain.tsx'
 import { PLACES, resolvePlaceRadiusFromBBox } from '@/game/places.ts'
 import { gameStore } from '@/game/gameStore.ts'
+import { initRapier, PhysicsWorld } from '@/game/physics.ts'
+
+type PlaceLoad = {
+  meshes: AbstractMesh[]
+  carrier: TransformNode
+}
 
 export const Map = () => {
   const scene = useScene()
@@ -15,8 +27,12 @@ export const Map = () => {
     if (!scene) return
     let cancelled = false
     const roots: TransformNode[] = []
+    const loaded: PlaceLoad[] = []
 
     ;(async () => {
+      await initRapier()
+      if (cancelled) return
+
       await Promise.all(
         PLACES.map(async (place) => {
           const result = await SceneLoader.ImportMeshAsync(
@@ -49,15 +65,54 @@ export const Map = () => {
           }
 
           roots.push(carrier)
+          loaded.push({ meshes: result.meshes, carrier })
         })
       )
 
-      if (!cancelled) setPlacesReady(true)
+      if (cancelled) return
+      setPlacesReady(true)
+
+      // Wait for Terrain to mount and populate terrainHeights before
+      // building the physics world (which needs the heightfield data).
+      while (!gameStore.terrainHeights) {
+        await new Promise((r) => setTimeout(r, 16))
+        if (cancelled) return
+      }
+
+      const physics = new PhysicsWorld(gameStore.terrainHeights)
+
+      // Bake each place mesh into a world-space trimesh collider.
+      for (const { meshes } of loaded) {
+        for (const m of meshes) {
+          const positions = m.getVerticesData(VertexBuffer.PositionKind)
+          const idx = m.getIndices()
+          if (!positions || !idx || positions.length === 0 || idx.length === 0) continue
+
+          m.computeWorldMatrix(true)
+          const worldMat = m.getWorldMatrix()
+
+          const worldPositions = new Float32Array(positions.length)
+          const tmp = new Vector3()
+          for (let i = 0; i < positions.length; i += 3) {
+            tmp.set(positions[i], positions[i + 1], positions[i + 2])
+            const w = Vector3.TransformCoordinates(tmp, worldMat)
+            worldPositions[i] = w.x
+            worldPositions[i + 1] = w.y
+            worldPositions[i + 2] = w.z
+          }
+
+          physics.addStaticTrimesh(worldPositions, new Uint32Array(idx))
+        }
+      }
+
+      gameStore.physics = physics
     })()
 
     return () => {
       cancelled = true
       roots.forEach((r) => r.dispose(false, true))
+      gameStore.physics?.dispose()
+      gameStore.physics = null
     }
   }, [scene])
 
