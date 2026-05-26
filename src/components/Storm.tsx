@@ -287,13 +287,16 @@ export const Storm = () => {
       matBack.setFloat('brightnessMax', storm.brightnessMax * 0.55)
       planeBack.material = matBack
 
-      // Render order: back pass first (group 0), front pass on top (group 1).
-      // Disable auto-clear-depth on group 1 so the front pass can depth-test
-      // against the back pass's depth (otherwise group 1 starts with a fresh
-      // depth buffer and the layering gains nothing).
+      // Render order within the default rendering group: alphaIndex controls
+      // the draw order of transparent meshes. Back pass (0) draws first, front
+      // pass (1) draws on top. Other transparent meshes (wing trails, etc.)
+      // keep the default alphaIndex (Number.MAX_VALUE) so they render AFTER
+      // both storm passes — their proximity to the camera then lets the depth
+      // test correctly put them in front of the storm when the bird is closer.
       planeBack.renderingGroupId = 0
-      plane.renderingGroupId = 1
-      scene.setRenderingAutoClearDepthStencil(1, false, true, true)
+      plane.renderingGroupId = 0
+      planeBack.alphaIndex = 0
+      plane.alphaIndex = 1
 
       let t0 = performance.now()
 
@@ -325,8 +328,6 @@ export const Storm = () => {
         plane.dispose()
         mat.dispose()
         root.dispose()
-        // Restore default group-1 auto-clear behavior.
-        scene.setRenderingAutoClearDepthStencil(1, true, true, true)
       }
     }
 

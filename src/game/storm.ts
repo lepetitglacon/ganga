@@ -144,14 +144,14 @@ export function applyStormForce(
 // Default storm — sits ~500m from spawn, tall enough to dominate the horizon.
 export function makeDefaultStorm(groundY: number): StormConfig {
   return {
-    center: new Vector3(0, groundY, 500),
+    center: new Vector3(150, groundY, 150),
 
     baseRadius: 64,
     topRadius: 130,
     height: 300,
     wallThickness: 4,
 
-    windSpeed: 150,
+    windSpeed: 20,
     outwardAccel: 150,
 
     patchCount: 4000,
