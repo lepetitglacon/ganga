@@ -130,9 +130,9 @@ export function applyStormForce(
   const r = Math.hypot(dx, dz) || 1
   const rx = dx / r
   const rz = dz / r
-  // CCW tangent (matches the visual rotation if windAngularSpeed > 0)
-  const tx = -rz
-  const tz = rx
+  // CW tangent — matches the visual swirl direction of the cone shader.
+  const tx = rz
+  const tz = -rx
   // smoothstep for soft entry/exit at the wall edges
   const s = sample.wallProximity * sample.wallProximity * (3 - 2 * sample.wallProximity)
   const wind = storm.windSpeed * s * dt
@@ -149,9 +149,9 @@ export function makeDefaultStorm(groundY: number): StormConfig {
     baseRadius: 64,
     topRadius: 130,
     height: 300,
-    wallThickness: 4,
+    wallThickness: 30,
 
-    windSpeed: 20,
+    windSpeed: 150,
     outwardAccel: 150,
 
     patchCount: 4000,
