@@ -1,28 +1,36 @@
 import { useCallback, useRef } from 'react'
-import { useScene } from 'react-babylonjs'
-import { Color4, MeshBuilder, Vector3, type LinesMesh } from '@babylonjs/core'
+import { useScene, useBeforeRender } from 'react-babylonjs'
+import {
+  Color3,
+  Color4,
+  MeshBuilder,
+  StandardMaterial,
+  Vector3,
+  type LinesMesh,
+  type Mesh,
+} from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
-import { shellRadiusAt } from '@/game/storm.ts'
+import { shellRadiusAt, stormSoundRange, type StormConfig } from '@/game/storm.ts'
 import { useDebug } from '@/hooks/useDebug.ts'
 
-// Visualise the storm wind force field and the wall band itself. Arrows
-// live on the wall midline and point in the direction `applyStormForce`
-// would push at that spot. Two wireframe truncated cones outline the
-// inner / outer surfaces of the dense ring so you can see whether the
-// bird is inside the force zone.
 const HEIGHT_LAYERS = 6
 const ANGULAR_SAMPLES = 24
-const WALL_RING_LAYERS = 10 // horizontal rings drawn along the cone height
-const WALL_RING_SEGMENTS = 48 // segments per ring (smooth circle)
-const WALL_VERTICAL_RIBS = 16 // vertical lines connecting top to bottom
-const ACCEL_SCALE = 0.08 // m of arrow per m/s²
-const ARROW_HEAD = 1.5 // m — small "V" at the tip
+const WALL_RING_LAYERS = 10
+const WALL_RING_SEGMENTS = 48
+const WALL_VERTICAL_RIBS = 16
+const ACCEL_SCALE = 0.08
+const ARROW_HEAD = 1.5
+
+type SoundCone = { storm: StormConfig; mesh: Mesh }
 
 export const StormDebug = () => {
   const scene = useScene()
   const meshRef = useRef<LinesMesh | null>(null)
+  const soundConesRef = useRef<SoundCone[]>([])
 
+  // 'mesh' category: storm wall surfaces + per-sample force arrows.
   useDebug(
+    'mesh',
     useCallback(
       (on: boolean) => {
         if (!on) {
@@ -37,10 +45,8 @@ export const StormDebug = () => {
         const colors: Color4[][] = []
 
         for (const storm of gameStore.storms) {
-          // --- Wall surfaces: inner (r - half) and outer (r + half) cones ---
           const half = storm.wallThickness / 2
           const drawSurface = (offset: number, color: Color4) => {
-            // Horizontal rings at evenly spaced heights.
             for (let h = 0; h <= WALL_RING_LAYERS; h++) {
               const relY = (h / WALL_RING_LAYERS) * storm.height
               const r = shellRadiusAt(storm, relY) + offset
@@ -63,7 +69,6 @@ export const StormDebug = () => {
                 colors.push([ringCols[s], ringCols[s + 1]])
               }
             }
-            // Vertical ribs from base to top.
             for (let s = 0; s < WALL_VERTICAL_RIBS; s++) {
               const theta = (s / WALL_VERTICAL_RIBS) * Math.PI * 2
               const cos = Math.cos(theta)
@@ -89,7 +94,6 @@ export const StormDebug = () => {
               }
             }
           }
-          // Inner = cyan (eye side), outer = magenta (free air side).
           drawSurface(-half, new Color4(0.2, 0.9, 1.0, 0.5))
           drawSurface(half, new Color4(1.0, 0.3, 0.9, 0.5))
 
@@ -103,7 +107,6 @@ export const StormDebug = () => {
               const sin = Math.sin(theta)
               const x = storm.center.x + cos * r
               const z = storm.center.z + sin * r
-              // Same math as applyStormForce, but without dt.
               const rx = cos
               const rz = sin
               const tx = rz
@@ -117,14 +120,11 @@ export const StormDebug = () => {
               const dz = (az / mag) * len
               const start = new Vector3(x, y, z)
               const end = new Vector3(x + dx, y, z + dz)
-              // Color: red intensity from outward push, green from wind.
-              // Alpha brightens with magnitude so weak spots fade out.
               const tStrength = Math.min(1, mag / 200)
               const cStart = new Color4(0.2, 1.0, 0.3, 0.35 + 0.5 * tStrength)
               const cEnd = new Color4(1.0, 0.3, 0.2, 0.5 + 0.5 * tStrength)
               lines.push([start, end])
               colors.push([cStart, cEnd])
-              // Arrow head: two small lines forming a V at the tip.
               const perpX = -dz / len
               const perpZ = dx / len
               const backX = end.x - (dx / len) * ARROW_HEAD
@@ -158,6 +158,54 @@ export const StormDebug = () => {
       [scene],
     ),
   )
+
+  // 'sound' category: cylindrical footprint of each storm's audible range.
+  useDebug(
+    'sound',
+    useCallback(
+      (on: boolean) => {
+        if (!on) {
+          for (const c of soundConesRef.current) {
+            c.mesh.material?.dispose()
+            c.mesh.dispose()
+          }
+          soundConesRef.current = []
+          return
+        }
+        if (!scene || soundConesRef.current.length > 0) return
+        if (gameStore.storms.length === 0) return
+
+        for (const storm of gameStore.storms) {
+          const r = stormSoundRange(storm)
+          const mesh = MeshBuilder.CreateCylinder(
+            'soundCylinder',
+            {
+              diameterTop: r.max * 2,
+              diameterBottom: r.max * 2,
+              height: storm.height,
+              tessellation: 32,
+            },
+            scene,
+          )
+          const mat = new StandardMaterial('soundCylinder-mat', scene)
+          mat.wireframe = true
+          mat.emissiveColor = new Color3(1, 0.6, 0.2)
+          mat.disableLighting = true
+          mesh.material = mat
+          mesh.isPickable = false
+          soundConesRef.current.push({ storm, mesh })
+        }
+      },
+      [scene],
+    ),
+  )
+
+  useBeforeRender(() => {
+    for (const c of soundConesRef.current) {
+      const y = c.storm.center.y + c.storm.height / 2
+      c.mesh.position.set(c.storm.center.x, y, c.storm.center.z)
+    }
+  })
 
   return null
 }

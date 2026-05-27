@@ -29,6 +29,7 @@ export const ThermalDebug = () => {
   const meshRef = useRef<LinesMesh | null>(null)
 
   useDebug(
+    'ground',
     useCallback(
       (on: boolean) => {
         if (!on) {

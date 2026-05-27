@@ -89,6 +89,23 @@ export function shellRadiusAt(storm: StormConfig, relY: number): number {
   return storm.baseRadius + (storm.topRadius - storm.baseRadius) * t
 }
 
+// Audio falloff zone for a storm's spatial sound. Min = full-volume core,
+// max = audible range. Shared between Storm (audio params) and StormDebug
+// (visualization) so they stay in sync.
+export const STORM_SOUND_MIN_FACTOR = 0.3
+export const STORM_SOUND_MAX_FACTOR = 1.5
+// Directional cone: full-volume inside the inner half-angle, fades to silence
+// between inner and outer half-angles. Cone tip at storm.center, axis = +Y
+// (opens upward, matching the storm's visual cone but wider).
+export const STORM_SOUND_INNER_HALF_ANGLE = Math.PI / 4 // 45°
+export const STORM_SOUND_OUTER_HALF_ANGLE = Math.PI / 3 // 60°
+export function stormSoundRange(storm: StormConfig): { min: number; max: number } {
+  return {
+    min: storm.topRadius * STORM_SOUND_MIN_FACTOR,
+    max: storm.topRadius * STORM_SOUND_MAX_FACTOR,
+  }
+}
+
 export interface StormSample {
   inWall: boolean // dense ring → forces apply, vision degraded
   insideEye: boolean // inside the calm core
@@ -155,7 +172,7 @@ export function makeDefaultStorm(groundY: number): StormConfig {
     baseRadius: 64,
     topRadius: 130,
     height: 300,
-    wallThickness: 30,
+    wallThickness: 50,
 
     windSpeed: 150,
     outwardAccel: 150,

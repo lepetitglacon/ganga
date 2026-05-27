@@ -10,9 +10,15 @@ import {
   Vector3,
 } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
-import { makeDefaultStorm, shellRadiusAt } from '@/game/storm.ts'
+import {
+  makeDefaultStorm,
+  shellRadiusAt,
+  stormSoundRange,
+  type StormConfig,
+} from '@/game/storm.ts'
 import { getTerrainHeight } from '@/game/terrain.ts'
 import { SUN_DIR } from '@/game/world.ts'
+import { audio } from '@/game/audio.ts'
 
 const STORM_VS = `
 precision highp float;
@@ -157,7 +163,15 @@ void main(void) {
 Effect.ShadersStore['stormVertexShader'] = STORM_VS
 Effect.ShadersStore['stormFragmentShader'] = STORM_FS
 
-export const Storm = () => {
+export interface StormProps {
+  configOverrides?: Partial<StormConfig>
+  // If set, the storm drifts horizontally at this velocity (m/s) and bounces
+  // off the given XZ bounds. The cone base re-samples the terrain each frame.
+  velocity?: { x: number; z: number }
+  bounds?: { minX: number; maxX: number; minZ: number; maxZ: number }
+}
+
+export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) => {
   const scene = useScene()
 
   useEffect(() => {
@@ -169,9 +183,11 @@ export const Storm = () => {
     const setup = () => {
       // Build the storm first to learn its XZ, then sample the terrain at
       // that location so the cone's base sits on the actual ground.
-      const storm = makeDefaultStorm(0)
+      const storm: StormConfig = { ...makeDefaultStorm(0), ...configOverrides }
+      if (configOverrides?.center) storm.center = configOverrides.center.clone()
       storm.center.y = getTerrainHeight(storm.center.x, storm.center.z)
       gameStore.storms.push(storm)
+      const vel = velocity ? { x: velocity.x, z: velocity.z } : null
 
       const root = new TransformNode('stormRoot', scene)
       // thinInstance matrices are kept in root-local space; the root's Y
@@ -202,6 +218,25 @@ export const Storm = () => {
       }
 
       root.position.copyFrom(storm.center)
+
+      audio.attachListener(scene)
+      let stormSound: import('@babylonjs/core/AudioV2').StaticSound | null = null
+      let soundDisposed = false
+      const soundRange = stormSoundRange(storm)
+      audio
+        .spatial('/sound/wind/tempest.wav', storm.center, {
+          minDistance: soundRange.min,
+          maxDistance: soundRange.max,
+          volume: 1,
+          distanceModel: 'linear',
+          // tempest.wav has a sharp non-zero sample at index 0 → loud click
+          // on first play. Long fade-in fully masks the attack.
+          fadeInMs: 1000,
+        })
+        .then((s) => {
+          if (soundDisposed) s.dispose()
+          else stormSound = s
+        })
 
       const plane = MeshBuilder.CreatePlane('stormQuad', { width: 1, height: 1 }, scene)
       plane.parent = root
@@ -299,14 +334,34 @@ export const Storm = () => {
       plane.alphaIndex = 1
 
       let t0 = performance.now()
+      let tPrev = t0
 
       const obs = scene.onBeforeRenderObservable.add(() => {
         const now = performance.now()
         const t = (now - t0) / 1000
+        const dt = Math.max(0, (now - tPrev) / 1000)
+        tPrev = now
         mat.setFloat('time', t)
         matBack.setFloat('time', t)
         // Swirl: rotate the whole cone around Y. Cheap visual that sells motion.
         root.rotation.y = t * storm.windAngularSpeed
+        // Drift across the map. Bounce on the XZ bounds so the storm stays
+        // reachable. Re-sample terrain so the cone base hugs the dunes.
+        if (vel) {
+          storm.center.x += vel.x * dt
+          storm.center.z += vel.z * dt
+          if (bounds) {
+            if (storm.center.x < bounds.minX) { storm.center.x = bounds.minX; vel.x = Math.abs(vel.x) }
+            else if (storm.center.x > bounds.maxX) { storm.center.x = bounds.maxX; vel.x = -Math.abs(vel.x) }
+            if (storm.center.z < bounds.minZ) { storm.center.z = bounds.minZ; vel.z = Math.abs(vel.z) }
+            else if (storm.center.z > bounds.maxZ) { storm.center.z = bounds.maxZ; vel.z = -Math.abs(vel.z) }
+          }
+          storm.center.y = getTerrainHeight(storm.center.x, storm.center.z)
+          root.position.copyFrom(storm.center)
+          mat.setFloat('stormBaseY', storm.center.y)
+          matBack.setFloat('stormBaseY', storm.center.y)
+          stormSound?.spatial.position.copyFrom(storm.center)
+        }
         // Sync scene fog into both shaders (Environment owns the baseline).
         const cam = scene.activeCamera
         mat.setColor3('fogColor', scene.fogColor)
@@ -323,6 +378,8 @@ export const Storm = () => {
         scene.onBeforeRenderObservable.remove(obs)
         const idx = gameStore.storms.indexOf(storm)
         if (idx >= 0) gameStore.storms.splice(idx, 1)
+        soundDisposed = true
+        stormSound?.dispose()
         planeBack.dispose()
         matBack.dispose()
         plane.dispose()

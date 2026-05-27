@@ -15,9 +15,15 @@ export const CAPSULE_RADIUS = 0.6
 export class PhysicsWorld {
   world: RAPIER.World
   playerBody: RAPIER.RigidBody | null = null
+  // Source data kept around purely for debug visualization. The heightfield
+  // grid is drawn from `terrainHeights`; each static place collider has its
+  // world-space vertices/indices stored on `staticTrimeshes`.
+  terrainHeights: Float32Array
+  staticTrimeshes: { vertices: Float32Array; indices: Uint32Array }[] = []
 
   constructor(terrainHeights: Float32Array) {
     this.world = new RAPIER.World(GRAVITY)
+    this.terrainHeights = terrainHeights
     const N = TERRAIN_SUBDIVISIONS
     const S = TERRAIN_SIZE
     const groundBody = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed())
@@ -30,6 +36,7 @@ export class PhysicsWorld {
   addStaticTrimesh(vertices: Float32Array, indices: Uint32Array): void {
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed())
     this.world.createCollider(RAPIER.ColliderDesc.trimesh(vertices, indices), body)
+    this.staticTrimeshes.push({ vertices, indices })
   }
 
   createPlayerBody(x: number, y: number, z: number): void {

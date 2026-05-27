@@ -20,6 +20,9 @@ import { useKeyboard } from '@/hooks/useKeyboard.ts'
 import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
 import { SUN_DIR } from '@/game/world.ts'
 import { applyStormForce, sampleStorm } from '@/game/storm.ts'
+import { audio } from '@/game/audio.ts'
+
+const FLAP_SOUND_URL = '/sound/bird/flap.mp3'
 
 // Horizon = level flight. camBeta is measured from +Y, so π/2 is horizontal.
 // Looking up (camBeta > π/2) climbs, looking down (camBeta < π/2) dives.
@@ -62,6 +65,8 @@ const GROUND_MARGIN_LEAVE = 1.0
 const LANDING_ENTER_TIME = 0.6 // seconds to impact → flare on
 const LANDING_EXIT_TIME = 1.1 // no impact within this horizon → flare off (hysteresis)
 const LANDING_MIN_SPEED = 1.0 // m/s — below this, skip the ray (degenerate dir)
+const LANDING_FLAP_INTERVAL = 0.25 // seconds between flap.mp3 plays during landing flare
+const LANDING_FLAP_PLAYBACK_RATE = 1.5 // playback speed multiplier during landing
 
 // Thermal updraft tuning.
 // Thermals form over sun-facing slopes (warm rising air). We measure that
@@ -93,11 +98,14 @@ export const Player = () => {
   const prevYawRef = useRef(0)
   const bankRef = useRef(0)
   const flightTimeRef = useRef(0)
+  const landingFlapTimerRef = useRef(0)
   const flapBoostRef = useRef(0)
   const flapCooldownRef = useRef(0)
   const flyAnimRef = useRef<AnimationGroup | null>(null)
   const idleAnimRef = useRef<AnimationGroup | null>(null)
   const prevBirdModeRef = useRef(gameStore.birdMode)
+  const wallSoundRef = useRef<{ setVolume: (v: number) => void } | null>(null)
+  const wallVolRef = useRef(0)
 
   useEffect(() => {
     if (!scene) return
@@ -117,6 +125,7 @@ export const Player = () => {
         flapBoostRef.current = FLAP_BOOST
         flapCooldownRef.current = FLAP_COOLDOWN
         flyAnimRef.current?.start(false)
+        audio.playOneShot(FLAP_SOUND_URL)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -214,6 +223,14 @@ export const Player = () => {
 
     setup().catch(console.error)
 
+    audio.initSoundPool(FLAP_SOUND_URL, 5).catch(console.error)
+
+    wallSoundRef.current = audio.loop('/sound/wind/tempest-inside-wall.wav', { volume: 0 })
+    const stopGusts = audio.startAmbientGusts('/sound/wind/wind.wav', 5, 20, {
+      volume: 0.5,
+      fadeSec: 1.5,
+    })
+
     return () => {
       cancelled = true
       window.removeEventListener('keydown', onKeyDown)
@@ -221,6 +238,9 @@ export const Player = () => {
       gameStore.trails = []
       gameStore.mesh?.dispose()
       gameStore.mesh = null
+      wallSoundRef.current?.setVolume(0)
+      wallSoundRef.current = null
+      stopGusts()
     }
   }, [scene])
 
@@ -307,6 +327,7 @@ export const Player = () => {
           true
         )
         flyAnimRef.current?.start(false)
+        audio.playOneShot(FLAP_SOUND_URL)
         takeoffFlapsLeftRef.current -= 1
         takeoffNextFlapRef.current = TAKEOFF_FLAP_INTERVAL
       }
@@ -362,9 +383,18 @@ export const Player = () => {
         if (!gameStore.landingApproach && toi !== null && toi <= enterDist) {
           gameStore.landingApproach = true
           flyAnimRef.current?.start(true)
+          audio.playOneShotPooled(FLAP_SOUND_URL, 5, { playbackRate: LANDING_FLAP_PLAYBACK_RATE })
+          landingFlapTimerRef.current = LANDING_FLAP_INTERVAL
         } else if (gameStore.landingApproach && toi === null) {
           gameStore.landingApproach = false
           flyAnimRef.current?.stop()
+        }
+      }
+      if (gameStore.landingApproach) {
+        landingFlapTimerRef.current -= dt
+        if (landingFlapTimerRef.current <= 0) {
+          audio.playOneShotPooled(FLAP_SOUND_URL, 5, { playbackRate: LANDING_FLAP_PLAYBACK_RATE })
+          landingFlapTimerRef.current = LANDING_FLAP_INTERVAL
         }
       }
 
@@ -391,17 +421,24 @@ export const Player = () => {
       const lv = body.linvel()
       const out = { x: lv.x, y: lv.y, z: lv.z }
       let maxProx = 0
+      let inWall = false
       for (const storm of gameStore.storms) {
         const s = sampleStorm(storm, t.x, t.y, t.z)
         if (s.wallProximity > maxProx) maxProx = s.wallProximity
+        if (s.inWall) inWall = true
         applyStormForce(storm, t.x, t.z, s, dt, out)
       }
       gameStore.stormProximity = maxProx
+      const target = inWall ? 1 : 0
+      wallVolRef.current += (target - wallVolRef.current) * Math.min(1, dt * 4)
+      wallSoundRef.current?.setVolume(wallVolRef.current)
       if (out.x !== lv.x || out.z !== lv.z) {
         body.setLinvel(out, true)
       }
     } else {
       gameStore.stormProximity = 0
+      wallVolRef.current += (0 - wallVolRef.current) * Math.min(1, dt * 4)
+      wallSoundRef.current?.setVolume(wallVolRef.current)
     }
 
     const v = body.linvel()

@@ -17,6 +17,12 @@ export type Place = {
   // flatRadius = bboxExtent * flatRadiusRatio (default 0.95)
   radiusPadding?: number
   flatRadiusRatio?: number
+  // World-space XZ bounding box of the loaded GLB, filled in once the
+  // mesh is imported. Used e.g. for ambient sound zones.
+  bbox?: { minX: number; maxX: number; minZ: number; maxZ: number }
+  // Optional ambient sound URL played while the player is inside `bbox`.
+  ambientSound?: string
+  ambientVolume?: number
 }
 
 export const PLACES: Place[] = [
@@ -25,7 +31,9 @@ export const PLACES: Place[] = [
     file: 'village.glb',
     position: new Vector3(200, 0, -150),
     groundY: 0,
-    radiusPadding: 5
+    radiusPadding: 5,
+    ambientSound: '/sound/ambiance/bird chipping.mp3',
+    ambientVolume: 0.6,
   },
 ]
 
@@ -67,4 +75,11 @@ export function resolvePlaceRadiusFromBBox(
   const flatRatio = place.flatRadiusRatio ?? 0.95
   if (place.radius == null) place.radius = extent * radiusPadding
   if (place.flatRadius == null) place.flatRadius = extent * flatRatio
+  // World-space XZ bbox = local bbox + place's XZ origin.
+  place.bbox = {
+    minX: place.position.x + min.x,
+    maxX: place.position.x + max.x,
+    minZ: place.position.z + min.z,
+    maxZ: place.position.z + max.z,
+  }
 }
