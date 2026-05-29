@@ -34,6 +34,11 @@ export const gameStore = {
   thermal: 0,
   speed: 0,
   flapCooldown: 0,
+  // Bird hydration, 0..1. Drains slowly over time; refills while wading in an
+  // oasis. Written by Player each frame, read by HUD.
+  water: 1,
+  // True while the bird is standing in oasis water (drives refill + SFX).
+  inWater: false,
   // Active sandstorms. Player reads these to apply forces; Storm component
   // owns the lifecycle (mount/unmount registers and removes entries).
   storms: [] as StormConfig[],

@@ -1,5 +1,14 @@
 import { Vector3 } from '@babylonjs/core'
 import { applyPlaceFlattening } from './places.ts'
+import { OASES } from './oasis.ts'
+
+// Oasis carving tuning.
+// Water surface sits OASIS_RIM_DEPTH below the surrounding sand (reads as a
+// sunken pool), and the bowl floor is OASIS_POOL_DEPTH below the water surface.
+// Kept shallow so a landed bird stands on the floor with its body roughly at
+// the waterline — i.e. it wades rather than drowns.
+const OASIS_RIM_DEPTH = 1.2
+const OASIS_POOL_DEPTH = 1.6
 
 export const TERRAIN_SIZE = 1600
 export const TERRAIN_SUBDIVISIONS = 192
@@ -50,14 +59,53 @@ function fbm(x: number, y: number, octaves: number, gain: number): number {
 }
 
 // Domain-warped fbm gives curvy, crescent-like dune crests instead of
-// the radially-symmetric blobs that raw fbm produces.
-function heightAt(x: number, z: number): number {
+// the radially-symmetric blobs that raw fbm produces. This is the bare dune
+// height (noise + place flattening), WITHOUT oasis carving — oasis water levels
+// are derived from it, so it must stay carve-free to avoid feedback.
+function baseHeight(x: number, z: number): number {
   const wx = fbm(x * 0.004, z * 0.004, 3, 0.5)
   const wz = fbm((x + 137) * 0.004, (z + 53) * 0.004, 3, 0.5)
   const base = fbm(x * 0.00175 + wx * 3.0, z * 0.00175 + wz * 3.0, 5, 0.55)
   const ripples = (fbm(x * 0.18, z * 0.18, 2, 0.5) - 0.5) * 0.7
   const h = (base - 0.5) * 150 + ripples
   return applyPlaceFlattening(x, z, h)
+}
+
+// Resolve each oasis's water surface / bowl floor from the local dune height.
+// Lazy + idempotent: the first heightAt() call (terrain bake) triggers it, and
+// Water.tsx calls it explicitly before reading waterY.
+let oasesResolved = false
+export function ensureOasesResolved(): void {
+  if (oasesResolved) return
+  oasesResolved = true
+  for (const o of OASES) {
+    const h0 = baseHeight(o.x, o.z)
+    o.waterY = h0 - OASIS_RIM_DEPTH
+    o.floorY = o.waterY - OASIS_POOL_DEPTH
+  }
+}
+
+// Carve a smooth bowl into the dunes at each oasis. t=1 at the center (terrain
+// pulled down to floorY) blending to 0 at the carve radius. We only ever lower
+// the terrain (min), so the bowl never raises a neighbouring dune.
+function applyOasisCarving(x: number, z: number, h: number): number {
+  ensureOasesResolved()
+  let out = h
+  for (const o of OASES) {
+    const dx = x - o.x
+    const dz = z - o.z
+    const r2 = o.radius * o.radius
+    const d2 = dx * dx + dz * dz
+    if (d2 >= r2) continue
+    const t = 1 - smooth(Math.sqrt(d2) / o.radius)
+    const carved = h * (1 - t) + o.floorY * t
+    if (carved < out) out = carved
+  }
+  return out
+}
+
+function heightAt(x: number, z: number): number {
+  return applyOasisCarving(x, z, baseHeight(x, z))
 }
 
 export function getTerrainHeight(worldX: number, worldZ: number): number {

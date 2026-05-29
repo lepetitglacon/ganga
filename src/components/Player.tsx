@@ -18,11 +18,23 @@ import {
 import { gameStore } from '@/game/gameStore.ts'
 import { useKeyboard } from '@/hooks/useKeyboard.ts'
 import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
+import { OASES } from '@/game/oasis.ts'
 import { SUN_DIR } from '@/game/world.ts'
 import { applyStormForce, sampleStorm } from '@/game/storm.ts'
 import { audio } from '@/game/audio.ts'
 
 const FLAP_SOUND_URL = '/sound/bird/flap.mp3'
+const SPLASH_SOUND_URL = '/sound/bird/plouf-big.wav'
+const WADING_SOUND_URL = '/sound/bird/wading.raw.mp3'
+
+// Hydration: drains slowly the whole time, refills fast while wading in an
+// oasis. Rates are per-second so they're framerate-independent in the
+// fixed-step loop. ~3 min to empty, ~3 s to fully refill.
+const WATER_DRAIN_RATE = 1 / 180
+const WATER_RECHARGE_RATE = 1 / 3
+// The bird counts as "in water" when its body is within an oasis disc and low
+// enough that it's standing in the basin rather than flying over it.
+const WATER_CONTACT_MARGIN = 0.6
 
 // Horizon = level flight. camBeta is measured from +Y, so π/2 is horizontal.
 // Looking up (camBeta > π/2) climbs, looking down (camBeta < π/2) dives.
@@ -106,6 +118,8 @@ export const Player = () => {
   const prevBirdModeRef = useRef(gameStore.birdMode)
   const wallSoundRef = useRef<{ setVolume: (v: number) => void } | null>(null)
   const wallVolRef = useRef(0)
+  const wadingSoundRef = useRef<{ setVolume: (v: number) => void } | null>(null)
+  const wadingVolRef = useRef(0)
 
   useEffect(() => {
     if (!scene) return
@@ -226,6 +240,7 @@ export const Player = () => {
     audio.initSoundPool(FLAP_SOUND_URL, 5).catch(console.error)
 
     wallSoundRef.current = audio.loop('/sound/wind/tempest-inside-wall.wav', { volume: 0 })
+    wadingSoundRef.current = audio.loop(WADING_SOUND_URL, { volume: 0 })
     const stopGusts = audio.startAmbientGusts('/sound/wind/wind.wav', 5, 20, {
       volume: 0.5,
       fadeSec: 1.5,
@@ -240,6 +255,8 @@ export const Player = () => {
       gameStore.mesh = null
       wallSoundRef.current?.setVolume(0)
       wallSoundRef.current = null
+      wadingSoundRef.current?.setVolume(0)
+      wadingSoundRef.current = null
       stopGusts()
     }
   }, [scene])
@@ -440,6 +457,33 @@ export const Player = () => {
       wallVolRef.current += (0 - wallVolRef.current) * Math.min(1, dt * 4)
       wallSoundRef.current?.setVolume(wallVolRef.current)
     }
+
+    // --- Oasis water / hydration ---
+    // In water when the body is inside an oasis disc (XZ) and low enough to be
+    // standing in the basin rather than flying over it. Refill while wading,
+    // drain slowly otherwise. A splash plays on the entry transition and a
+    // wading loop fades in for as long as the bird stays in the water.
+    const tp = body.translation()
+    let inWater = false
+    for (const o of OASES) {
+      const dx = tp.x - o.x
+      const dz = tp.z - o.z
+      if (
+        dx * dx + dz * dz < o.waterRadius * o.waterRadius &&
+        tp.y < o.waterY + WATER_CONTACT_MARGIN
+      ) {
+        inWater = true
+        break
+      }
+    }
+    gameStore.water = inWater
+      ? Math.min(1, gameStore.water + WATER_RECHARGE_RATE * dt)
+      : Math.max(0, gameStore.water - WATER_DRAIN_RATE * dt)
+    if (inWater && !gameStore.inWater) audio.playOneShot(SPLASH_SOUND_URL)
+    gameStore.inWater = inWater
+    const wadingTarget = inWater ? 1 : 0
+    wadingVolRef.current += (wadingTarget - wadingVolRef.current) * Math.min(1, dt * 4)
+    wadingSoundRef.current?.setVolume(wadingVolRef.current * 0.7)
 
     const v = body.linvel()
     gameStore.speed = Math.hypot(v.x, v.y, v.z)

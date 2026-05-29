@@ -5,6 +5,7 @@ export const HUD = () => {
   const [speed, setSpeed] = useState(0)
   const [cooldown, setCooldown] = useState(0)
   const [flying, setFlying] = useState(false)
+  const [water, setWater] = useState(1)
 
   useEffect(() => {
     let raf = 0
@@ -12,6 +13,7 @@ export const HUD = () => {
       setSpeed(gameStore.speed)
       setCooldown(gameStore.flapCooldown)
       setFlying(gameStore.birdMode !== 'grounded')
+      setWater(gameStore.water)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -46,6 +48,33 @@ export const HUD = () => {
       >
         <div style={{ opacity: 0.7, fontSize: 11, letterSpacing: 1 }}>SPEED</div>
         <div style={{ fontSize: 22, fontWeight: 600 }}>{speed.toFixed(1)} m/s</div>
+
+        <div style={{ opacity: 0.7, fontSize: 11, letterSpacing: 1, marginTop: 10 }}>
+          WATER
+        </div>
+        <div
+          style={{
+            width: 120,
+            height: 8,
+            marginTop: 4,
+            borderRadius: 4,
+            background: 'rgba(255,255,255,0.15)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              width: `${Math.round(water * 100)}%`,
+              height: '100%',
+              borderRadius: 4,
+              background:
+                water < 0.2
+                  ? '#e0533d'
+                  : 'linear-gradient(90deg, #2e8b8b, #6fd0d0)',
+              transition: 'width 0.2s linear, background 0.3s',
+            }}
+          />
+        </div>
       </div>
 
       <div
