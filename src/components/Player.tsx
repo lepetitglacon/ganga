@@ -32,9 +32,18 @@ const WADING_SOUND_URL = '/sound/bird/wading.raw.mp3'
 // fixed-step loop. ~3 min to empty, ~3 s to fully refill.
 const WATER_DRAIN_RATE = 1 / 180
 const WATER_RECHARGE_RATE = 1 / 3
-// The bird counts as "in water" when its body is within an oasis disc and low
-// enough that it's standing in the basin rather than flying over it.
-const WATER_CONTACT_MARGIN = 0.6
+// The bird counts as "in water" when its XZ is inside an oasis water disc AND
+// it's near the ground (not flying over it). Keyed off height ABOVE the local
+// terrain so entry/exit happens right at the visible shoreline (the carve makes
+// terrain == waterY exactly at waterRadius), not deep in the center.
+const WATER_WADE_HEIGHT = 1.8 // m above terrain — ~capsule height when standing
+// A big splash fires once when the bird first enters the water. The wading
+// loop then plays only while the bird is actually moving through it.
+const WADE_MIN_SPEED = 1.2 // m/s horizontal — below this, no wading sound
+
+// Feet wetness: 1 while wading, drying out over this many meters of subsequent
+// ground travel. Exposed on gameStore so WetnessMask paints the trail.
+const WET_TRAIL_LENGTH = 12 // meters of travel before the feet fully dry out
 
 // Horizon = level flight. camBeta is measured from +Y, so π/2 is horizontal.
 // Looking up (camBeta > π/2) climbs, looking down (camBeta < π/2) dives.
@@ -120,6 +129,8 @@ export const Player = () => {
   const wallVolRef = useRef(0)
   const wadingSoundRef = useRef<{ setVolume: (v: number) => void } | null>(null)
   const wadingVolRef = useRef(0)
+  // 0..1 how wet the feet are; drives the trail and dries out over distance.
+  const feetWetRef = useRef(0)
 
   useEffect(() => {
     if (!scene) return
@@ -465,24 +476,38 @@ export const Player = () => {
     // wading loop fades in for as long as the bird stays in the water.
     const tp = body.translation()
     let inWater = false
-    for (const o of OASES) {
-      const dx = tp.x - o.x
-      const dz = tp.z - o.z
-      if (
-        dx * dx + dz * dz < o.waterRadius * o.waterRadius &&
-        tp.y < o.waterY + WATER_CONTACT_MARGIN
-      ) {
-        inWater = true
-        break
+    if (tp.y - getTerrainHeight(tp.x, tp.z) < WATER_WADE_HEIGHT) {
+      for (const o of OASES) {
+        const dx = tp.x - o.x
+        const dz = tp.z - o.z
+        if (dx * dx + dz * dz < o.waterRadius * o.waterRadius) {
+          inWater = true
+          break
+        }
       }
     }
     gameStore.water = inWater
       ? Math.min(1, gameStore.water + WATER_RECHARGE_RATE * dt)
       : Math.max(0, gameStore.water - WATER_DRAIN_RATE * dt)
+
+    // One big splash on the entry into the water.
     if (inWater && !gameStore.inWater) audio.playOneShot(SPLASH_SOUND_URL)
+
+    const lvW = body.linvel()
+    const hSpeed = Math.hypot(lvW.x, lvW.z)
+    const moving = hSpeed > WADE_MIN_SPEED
+
+    // Feet wetness: full while wading, then dries out over WET_TRAIL_LENGTH
+    // meters of subsequent travel. WetnessMask reads it to paint the trail.
+    if (inWater) feetWetRef.current = 1
+    else if (feetWetRef.current > 0)
+      feetWetRef.current = Math.max(0, feetWetRef.current - (hSpeed * dt) / WET_TRAIL_LENGTH)
+    gameStore.feetWet = feetWetRef.current
+
     gameStore.inWater = inWater
-    const wadingTarget = inWater ? 1 : 0
-    wadingVolRef.current += (wadingTarget - wadingVolRef.current) * Math.min(1, dt * 4)
+    // Wading loop plays only while moving through the water; silent when still.
+    const wadingTarget = inWater && moving ? 1 : 0
+    wadingVolRef.current += (wadingTarget - wadingVolRef.current) * Math.min(1, dt * 6)
     wadingSoundRef.current?.setVolume(wadingVolRef.current * 0.7)
 
     const v = body.linvel()
@@ -549,6 +574,7 @@ export const Player = () => {
         trail.setEnabled(false)
       }
     }
+
   })
 
   return null

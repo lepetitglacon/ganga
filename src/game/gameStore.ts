@@ -39,6 +39,9 @@ export const gameStore = {
   water: 1,
   // True while the bird is standing in oasis water (drives refill + SFX).
   inWater: false,
+  // 0..1 how wet the bird's feet are; drives the wet trail painted by
+  // WetnessMask. Set to 1 while wading, dries out as it walks on dry sand.
+  feetWet: 0,
   // Active sandstorms. Player reads these to apply forces; Storm component
   // owns the lifecycle (mount/unmount registers and removes entries).
   storms: [] as StormConfig[],

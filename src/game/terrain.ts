@@ -2,13 +2,10 @@ import { Vector3 } from '@babylonjs/core'
 import { applyPlaceFlattening } from './places.ts'
 import { OASES } from './oasis.ts'
 
-// Oasis carving tuning.
-// Water surface sits OASIS_RIM_DEPTH below the surrounding sand (reads as a
-// sunken pool), and the bowl floor is OASIS_POOL_DEPTH below the water surface.
-// Kept shallow so a landed bird stands on the floor with its body roughly at
-// the waterline — i.e. it wades rather than drowns.
-const OASIS_RIM_DEPTH = 1.2
-const OASIS_POOL_DEPTH = 1.6
+// How far the carved rim crest sits ABOVE the water surface. The bowl always
+// rises past the waterline just outside the water disc, so the flat surface is
+// enclosed on every side (no edge-on view of the plane), even on a slope.
+const OASIS_RIM_LIP = 0.9
 
 export const TERRAIN_SIZE = 1600
 export const TERRAIN_SUBDIVISIONS = 192
@@ -80,26 +77,42 @@ export function ensureOasesResolved(): void {
   oasesResolved = true
   for (const o of OASES) {
     const h0 = baseHeight(o.x, o.z)
-    o.waterY = h0 - OASIS_RIM_DEPTH
-    o.floorY = o.waterY - OASIS_POOL_DEPTH
+    o.waterY = h0 - o.rimDepth
+    o.floorY = o.waterY - o.poolDepth
   }
 }
 
-// Carve a smooth bowl into the dunes at each oasis. t=1 at the center (terrain
-// pulled down to floorY) blending to 0 at the carve radius. We only ever lower
-// the terrain (min), so the bowl never raises a neighbouring dune.
+// Carve a self-contained basin at each oasis. Inside the carve radius the
+// terrain is REPLACED by an analytic profile (not just lowered): it rises from
+// the bowl floor at the center, past the waterline to a rim crest just outside
+// the water disc, then blends back to the natural dune height at the radius.
+// Because the crest is always above waterY, the flat water plane is fully
+// enclosed even when the oasis sits on a slope — no edge-on view of the disc.
+// Oases never overlap (MIN_SEPARATION > MAX_RADIUS), so a point is shaped by at
+// most one of them.
 function applyOasisCarving(x: number, z: number, h: number): number {
   ensureOasesResolved()
   let out = h
   for (const o of OASES) {
     const dx = x - o.x
     const dz = z - o.z
-    const r2 = o.radius * o.radius
     const d2 = dx * dx + dz * dz
-    if (d2 >= r2) continue
-    const t = 1 - smooth(Math.sqrt(d2) / o.radius)
-    const carved = h * (1 - t) + o.floorY * t
-    if (carved < out) out = carved
+    if (d2 >= o.radius * o.radius) continue
+    const u = Math.sqrt(d2) / o.radius // 0 at center, 1 at carve edge
+    const ratio = o.waterRadius / o.radius // shoreline == visible disc edge
+    const uCrest = Math.min(0.96, ratio + 0.1) // berm crest just past the shore
+    const crestY = o.waterY + OASIS_RIM_LIP
+    if (u <= ratio) {
+      // Bowl floor → exactly waterY at the shoreline, so the flat disc fills
+      // the basin precisely (water reaches the rendered edge, no buried ring).
+      out = o.floorY + (o.waterY - o.floorY) * smooth(u / ratio)
+    } else if (u <= uCrest) {
+      // Shoreline → berm crest, just outside the water — encloses the surface.
+      out = o.waterY + (crestY - o.waterY) * smooth((u - ratio) / (uCrest - ratio))
+    } else {
+      // Berm crest → natural terrain at the outer radius.
+      out = crestY + (h - crestY) * smooth((u - uCrest) / (1 - uCrest))
+    }
   }
   return out
 }

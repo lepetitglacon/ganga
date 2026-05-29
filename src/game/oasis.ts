@@ -15,6 +15,10 @@ export type Oasis = {
   // Visible water disc radius — kept inside `radius` so the carved sand rim
   // always overlaps the water edge (no surface poking out of a dune).
   waterRadius: number
+  // Per-oasis carve depths (randomized). rimDepth = how far the water sits
+  // below the surrounding sand; poolDepth = bowl floor below the water surface.
+  rimDepth: number
+  poolDepth: number
   // Filled by terrain.ts:ensureOasesResolved(). 0 until resolved.
   waterY: number
   floorY: number
@@ -59,7 +63,20 @@ function generateOases(): Oasis[] {
     if (Math.hypot(x - VILLAGE_POS.x, z - VILLAGE_POS.z) < VILLAGE_CLEARANCE) continue
     if (list.some((o) => Math.hypot(o.x - x, o.z - z) < MIN_SEPARATION)) continue
     const radius = MIN_RADIUS + rng() * (MAX_RADIUS - MIN_RADIUS)
-    list.push({ x, z, radius, waterRadius: radius * 0.62, waterY: 0, floorY: 0 })
+    const waterRatio = 0.55 + rng() * 0.15 // 0.55..0.70 of the carve radius
+    // Kept shallow enough that a landed bird wades rather than fully submerges.
+    const rimDepth = 0.9 + rng() * 0.6 // 0.9..1.5 below surrounding sand
+    const poolDepth = 1.2 + rng() * 1.2 // 1.2..2.4 below the water surface
+    list.push({
+      x,
+      z,
+      radius,
+      waterRadius: radius * waterRatio,
+      rimDepth,
+      poolDepth,
+      waterY: 0,
+      floorY: 0,
+    })
   }
   return list
 }
