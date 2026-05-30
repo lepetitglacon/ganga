@@ -67,6 +67,9 @@ const GROUND_DECEL = 3.6 // m/s² horizontal
 const FLAP_BOOST = 1.2 // +120% speed at peak
 const FLAP_DECAY = 0.55 // per-second exponential decay rate (slow)
 const FLAP_COOLDOWN = 0.5
+// Each in-flight flap flings water off the wings: hydration drops by this
+// fraction per beat (~25 flaps to empty a full reserve).
+const FLAP_WATER_COST = 0.04
 
 // Takeoff: scripted sequence of wing-beats to leave the ground.
 // Gravity is disabled and each flap punches y-velocity upward; after the
@@ -151,6 +154,15 @@ export const Player = () => {
         flapCooldownRef.current = FLAP_COOLDOWN
         flyAnimRef.current?.start(false)
         audio.playOneShot(FLAP_SOUND_URL)
+        // Shed water on the beat: drain hydration and hand the droplet burst
+        // the bird's current velocity so the drops fly off along its heading.
+        gameStore.water = Math.max(0, gameStore.water - FLAP_WATER_COST)
+        const body = gameStore.physics?.playerBody
+        if (body) {
+          const lv = body.linvel()
+          gameStore.flapVel = { x: lv.x, y: lv.y, z: lv.z }
+        }
+        gameStore.flapId++
       }
     }
     window.addEventListener('keydown', onKeyDown)

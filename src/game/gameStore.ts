@@ -34,6 +34,11 @@ export const gameStore = {
   thermal: 0,
   speed: 0,
   flapCooldown: 0,
+  // Incremented once per in-flight wing-flap. WaterDrops watches this to fire a
+  // droplet burst; flapVel holds the bird's velocity at that instant so the
+  // shed drops inherit the bird's heading (and keep it if the bird then turns).
+  flapId: 0,
+  flapVel: { x: 0, y: 0, z: 0 },
   // Bird hydration, 0..1. Drains slowly over time; refills while wading in an
   // oasis. Written by Player each frame, read by HUD.
   water: 1,

@@ -6,6 +6,7 @@ import { Map } from './components/Map.tsx'
 import { Water } from './components/Water.tsx'
 import { WetnessMask } from './components/WetnessMask.tsx'
 import { Player } from './components/Player.tsx'
+import { WaterDrops } from './components/WaterDrops.tsx'
 import { CameraController } from './components/CameraController.tsx'
 import { PostProcess } from './components/PostProcess.tsx'
 import { Storm } from './components/Storm.tsx'
@@ -30,6 +31,7 @@ export default function App() {
           <CameraController />
           <PostProcess />
           <Player />
+          <WaterDrops />
           <PlaceAmbience />
           <Storm />
           <Storm
