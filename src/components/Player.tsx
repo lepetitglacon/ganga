@@ -4,7 +4,6 @@ import {
   SceneLoader,
   Vector3,
   Quaternion,
-  Matrix,
   TransformNode,
   TrailMesh,
   StandardMaterial,
@@ -61,24 +60,21 @@ const FIXED_DT = 1 / 60
 const MAX_SUB_STEPS = 5
 
 const WALK_SPEED = 5
-// Procedural walk: no walk clip ships in the GLB, so the legs are driven by
-// code. Cadence scales with ground speed (the phase advances by distance
-// travelled, not time), and the whole cycle blends in/out with speed so a
-// standstill rests in the neutral pose.
-const WALK_STRIDE = 1.6 // meters of travel per full leg cycle
-const WALK_HIP_SWING = 0.45 // rad — fore/aft thigh swing amplitude
-const WALK_KNEE_BEND = 0.5 // rad — knee flex on the back half of each step
-const WALK_BLEND_RATE = 8 // 1/s — how fast the walk fades in/out with speed
-// Body follow-through: the spine bobs up on each push-off (twice per cycle) and
-// rocks fore/aft. Driven on the spine root bone, NOT the carrier, so the planted
-// legs (siblings in the rig) stay put while the body rides over them.
-const WALK_BODY_BOB = 0.05 // local units — vertical push-off amplitude
-const WALK_BODY_LEAN = 0.12 // rad — fore/aft body rock
-// Chicken/pigeon head bob: the neck thrusts once per step so the head reads as
-// holding still between steps. Amplitude is in radians on the neck-base bone;
-// because cadence (and thus the neck's linear speed) scales with walk speed, the
-// "hold" illusion holds at any speed — only the amplitude needs tuning.
-const WALK_HEAD_BOB = 0.35 // rad — neck fore/aft swing per step
+// Ground animation: the Blender clips drive the bones now, we just pick which
+// one plays. The walk cycle's playback speed scales with ground speed so the
+// gait matches movement, normalised to this reference speed.
+const WALK_ANIM_MIN_SPEED = 0.5 // m/s — below this, play the standing-idle pose
+const WALK_ANIM_REF_SPEED = WALK_SPEED // m/s at which walking-forward plays at 1×
+// The wing-flap clip is a transient overlay on the glide, fired as discrete
+// beats. The GLB clip is long, so we speed it up to make each beat snappy.
+const WING_FLAP_CLIP_LEN = 2.0 // s — actual length of the wing-flap clip
+const WING_FLAP_DURATION = 0.8 // s — on-screen length of one flap beat
+const WING_FLAP_SPEED = WING_FLAP_CLIP_LEN / WING_FLAP_DURATION // clip playback rate
+// Landing flare flaps: the bird beats to brake, more beats the faster it comes
+// in. One braking flap per this many m/s of approach speed, clamped.
+const LANDING_FLAP_PER_SPEED = 7 // m/s of approach speed per braking flap
+const LANDING_FLAPS_MIN = 2
+const LANDING_FLAPS_MAX = 7
 const FLIGHT_SPEED = 14 // cruise airspeed (m/s) — level flight settles here
 // Light flight realism: airspeed is no longer constant. Gravity acts along the
 // flight path, so a climb trades speed for altitude and a dive trades altitude
@@ -157,31 +153,34 @@ export const Player = () => {
   const flightSpeedRef = useRef(FLIGHT_SPEED)
   const flapBoostRef = useRef(0)
   const flapCooldownRef = useRef(0)
-  const flyAnimRef = useRef<AnimationGroup | null>(null)
-  const idleAnimRef = useRef<AnimationGroup | null>(null)
-  const prevBirdModeRef = useRef(gameStore.birdMode)
+  // Blender clips: walk cycle, standing-idle pose, glide, and the flap overlay.
+  const walkFwdAnimRef = useRef<AnimationGroup | null>(null)
+  const walkIdleAnimRef = useRef<AnimationGroup | null>(null)
+  const glideAnimRef = useRef<AnimationGroup | null>(null)
+  const flapAnimRef = useRef<AnimationGroup | null>(null)
+  // The clip currently playing, and remaining time of an in-flight flap beat.
+  const currentAnimRef = useRef<AnimationGroup | null>(null)
+  const flapTimerRef = useRef(0)
+  // Braking flaps still to fire during a landing approach (set from speed).
+  const landingFlapsLeftRef = useRef(0)
+
+  // Fire one wing-flap beat: restart the clip sped up so it lasts one beat, and
+  // mark it the current clip. Used by the cruise flap, takeoff, and landing.
+  const triggerFlap = () => {
+    flapTimerRef.current = WING_FLAP_DURATION
+    const flap = flapAnimRef.current
+    if (!flap) return
+    currentAnimRef.current?.stop()
+    flap.speedRatio = WING_FLAP_SPEED
+    flap.start(false)
+    currentAnimRef.current = flap
+  }
   const wallSoundRef = useRef<{ setVolume: (v: number) => void } | null>(null)
   const wallVolRef = useRef(0)
   const wadingSoundRef = useRef<{ setVolume: (v: number) => void } | null>(null)
   const wadingVolRef = useRef(0)
   // 0..1 how wet the feet are; drives the trail and dries out over distance.
   const feetWetRef = useRef(0)
-  // Procedural walk rig: each driven bone keeps its rest pose, the local hinge
-  // axis used for fore/aft swing, the local direction of world-up (for vertical
-  // bob) and its rest position. The per-frame loop advances phase/blend.
-  type WalkJoint = {
-    node: TransformNode
-    rest: Quaternion
-    hinge: Vector3
-    up: Vector3
-    restPos: Vector3
-  }
-  const legsRef = useRef<{ hip: WalkJoint; knee: WalkJoint; phase: number }[]>([])
-  const bodyJointRef = useRef<WalkJoint | null>(null)
-  const neckJointRef = useRef<WalkJoint | null>(null)
-  const walkPhaseRef = useRef(0)
-  const walkBlendRef = useRef(0)
-  const walkIdleStoppedRef = useRef(false)
 
   useEffect(() => {
     if (!scene) return
@@ -200,7 +199,7 @@ export const Player = () => {
       } else if (gameStore.birdMode === 'flying' && flapCooldownRef.current <= 0) {
         flapBoostRef.current = FLAP_BOOST
         flapCooldownRef.current = FLAP_COOLDOWN
-        flyAnimRef.current?.start(false)
+        triggerFlap()
         audio.playOneShot(FLAP_SOUND_URL)
         // Shed water on the beat — but only if the bird actually carries any.
         // Drain hydration and hand the droplet burst the bird's current velocity
@@ -260,15 +259,12 @@ export const Player = () => {
         result.animationGroups.map((g) => g.name)
       )
       for (const g of result.animationGroups) g.stop()
-      const flyAnim =
-        result.animationGroups.find((g) => /fly/i.test(g.name)) ?? null
-      const idleAnim =
-        result.animationGroups.find(
-          (g) => g !== flyAnim && /idle|ground|stand|default/i.test(g.name)
-        ) ?? result.animationGroups.find((g) => g !== flyAnim) ?? null
-      flyAnimRef.current = flyAnim
-      idleAnimRef.current = idleAnim
-      if (idleAnim) idleAnim.start(true)
+      const findAnim = (re: RegExp) =>
+        result.animationGroups.find((g) => re.test(g.name)) ?? null
+      walkFwdAnimRef.current = findAnim(/walking-forward/i)
+      walkIdleAnimRef.current = findAnim(/walking-idle/i)
+      glideAnimRef.current = findAnim(/wing-float/i)
+      flapAnimRef.current = findAnim(/wing-flap/i)
 
       // Wing-tip trails (Feather-style). Track the armature's wing.end.l/.r
       // bones — the far tip of each wing — so the trail follows the flapping
@@ -301,60 +297,6 @@ export const Player = () => {
         trailR.setEnabled(false)
         gameStore.trails = [trailL, trailR]
       }
-
-      // --- Procedural walk rig ---
-      // Capture each leg's hip (Bone.014) + knee (Bone.015) rest pose and the
-      // local hinge axis that swings the leg fore/aft — i.e. the bone-local axis
-      // whose world direction lines up with the bird's lateral (wing) axis.
-      // useBeforeRender then rotates around that hinge to step the legs.
-      tipL?.computeWorldMatrix(true)
-      tipR?.computeWorldMatrix(true)
-      const latWorld = tipL && tipR
-        ? tipR.getAbsolutePosition().subtract(tipL.getAbsolutePosition()).normalize()
-        : Vector3.Right()
-      const makeJoint = (name: string): WalkJoint | null => {
-        const node = findBoneNode(name)
-        if (!node) return null
-        node.computeWorldMatrix(true)
-        const wm = node.getWorldMatrix()
-        // Hinge: the bone-local axis whose world direction best matches the
-        // bird's lateral axis — i.e. the axle for a fore/aft swing.
-        let hinge = Vector3.Right()
-        let bestDot = -1
-        for (const axis of [Vector3.Right(), Vector3.Up(), Vector3.Forward()]) {
-          const w = Vector3.TransformNormal(axis, wm).normalize()
-          const d = Math.abs(Vector3.Dot(w, latWorld))
-          if (d > bestDot) {
-            bestDot = d
-            hinge = axis
-          }
-        }
-        // Local direction of world-up: invert the bone's world rotation (its
-        // transpose, the bone being unscaled) and push +Y through it.
-        const invRot = Matrix.Identity()
-        wm.getRotationMatrix().transposeToRef(invRot)
-        const up = Vector3.TransformNormal(Vector3.Up(), invRot).normalize()
-        const rest = node.rotationQuaternion
-          ? node.rotationQuaternion.clone()
-          : Quaternion.FromEulerVector(node.rotation)
-        return { node, rest, hinge, up, restPos: node.position.clone() }
-      }
-      const hipL = makeJoint('Bone.014.l')
-      const kneeL = makeJoint('Bone.015.l')
-      const hipR = makeJoint('Bone.014.r')
-      const kneeR = makeJoint('Bone.015.r')
-      if (hipL && kneeL && hipR && kneeR) {
-        // Legs step a half-cycle apart so they alternate.
-        legsRef.current = [
-          { hip: hipL, knee: kneeL, phase: 0 },
-          { hip: hipR, knee: kneeR, phase: Math.PI },
-        ]
-      } else {
-        console.warn('bird.glb: leg bones Bone.014/015.l/.r not found — walk disabled')
-      }
-      // Spine root for body bob/lean, neck base for the chicken head bob.
-      bodyJointRef.current = makeJoint('Bone')
-      neckJointRef.current = makeJoint('Bone.001')
 
       gameStore.physics.createPlayerBody(spawn.x, spawn.y, spawn.z)
       lastTimeRef.current = performance.now()
@@ -470,7 +412,7 @@ export const Player = () => {
           },
           true
         )
-        flyAnimRef.current?.start(false)
+        triggerFlap()
         audio.playOneShot(FLAP_SOUND_URL)
         takeoffFlapsLeftRef.current -= 1
         takeoffNextFlapRef.current = TAKEOFF_FLAP_INTERVAL
@@ -547,18 +489,22 @@ export const Player = () => {
         const toi = physics.raycast(tNow, dir, exitDist)
         if (!gameStore.landingApproach && toi !== null && toi <= enterDist) {
           gameStore.landingApproach = true
-          flyAnimRef.current?.start(true)
-          audio.playOneShotPooled(FLAP_SOUND_URL, 5, { playbackRate: LANDING_FLAP_PLAYBACK_RATE })
-          landingFlapTimerRef.current = LANDING_FLAP_INTERVAL
+          // More braking flaps the faster the bird comes in; fire the first now.
+          landingFlapsLeftRef.current = Math.max(
+            LANDING_FLAPS_MIN,
+            Math.min(LANDING_FLAPS_MAX, Math.round(speedH / LANDING_FLAP_PER_SPEED))
+          )
+          landingFlapTimerRef.current = 0
         } else if (gameStore.landingApproach && toi === null) {
           gameStore.landingApproach = false
-          flyAnimRef.current?.stop()
         }
       }
-      if (gameStore.landingApproach) {
+      if (gameStore.landingApproach && landingFlapsLeftRef.current > 0) {
         landingFlapTimerRef.current -= dt
         if (landingFlapTimerRef.current <= 0) {
+          triggerFlap()
           audio.playOneShotPooled(FLAP_SOUND_URL, 5, { playbackRate: LANDING_FLAP_PLAYBACK_RATE })
+          landingFlapsLeftRef.current -= 1
           landingFlapTimerRef.current = LANDING_FLAP_INTERVAL
         }
       }
@@ -674,20 +620,6 @@ export const Player = () => {
     gameStore.speed = Math.hypot(v.x, v.y, v.z)
     gameStore.flapCooldown = Math.max(0, flapCooldownRef.current)
 
-    // Animation transitions
-    if (gameStore.birdMode !== prevBirdModeRef.current) {
-      const inAir = gameStore.birdMode !== 'grounded'
-      const wasInAir = prevBirdModeRef.current !== 'grounded'
-      if (inAir && !wasInAir) {
-        idleAnimRef.current?.stop()
-        flyAnimRef.current?.start(false)
-      } else if (!inAir && wasInAir) {
-        flyAnimRef.current?.stop()
-        idleAnimRef.current?.start(true)
-      }
-      prevBirdModeRef.current = gameStore.birdMode
-    }
-
     physics.step(dt)
     } // end fixed-step loop
     // If we hit the sub-step cap, drop leftover accumulator so the spiral
@@ -724,72 +656,41 @@ export const Player = () => {
     if (!mesh.rotationQuaternion) mesh.rotationQuaternion = target.clone()
     else Quaternion.SlerpToRef(mesh.rotationQuaternion, target, 1 - Math.exp(-ORIENT_SMOOTHING * frameDt), mesh.rotationQuaternion)
 
-    // --- Procedural walk ---
-    // Drive the legs only while grounded; in the air the fly clip owns them.
-    // Cadence comes from distance travelled so the gait matches ground speed,
-    // and the cycle blends out to the rest pose as the bird slows to a stop.
-    const legs = legsRef.current
-    if (legs.length) {
-      if (gameStore.birdMode === 'grounded') {
-        const lv = body.linvel()
-        const horiz = Math.hypot(lv.x, lv.z)
-        const target = Math.min(1, horiz / WALK_SPEED)
-        walkBlendRef.current +=
-          (target - walkBlendRef.current) * (1 - Math.exp(-WALK_BLEND_RATE * frameDt))
-        walkPhaseRef.current += horiz * frameDt * ((2 * Math.PI) / WALK_STRIDE)
-        const blend = walkBlendRef.current
-        const phase = walkPhaseRef.current
-        for (const leg of legs) {
-          const p = phase + leg.phase
-          const hipAng = Math.sin(p) * WALK_HIP_SWING * blend
-          // Knee flexes only on the back half of the swing (foot lifts off).
-          const kneeAng = Math.max(0, -Math.sin(p)) * WALK_KNEE_BEND * blend
-          leg.hip.node.rotationQuaternion = leg.hip.rest.multiply(
-            Quaternion.RotationAxis(leg.hip.hinge, hipAng)
-          )
-          leg.knee.node.rotationQuaternion = leg.knee.rest.multiply(
-            Quaternion.RotationAxis(leg.knee.hinge, kneeAng)
-          )
-        }
-
-        // Body: rise on each of the two push-offs per cycle (2×phase) and rock
-        // fore/aft. Applied to the spine root so the planted legs don't follow.
-        const bodyJoint = bodyJointRef.current
-        if (bodyJoint) {
-          const bob = -Math.cos(2 * phase) * WALK_BODY_BOB * blend
-          const lean = Math.sin(2 * phase) * WALK_BODY_LEAN * blend
-          bodyJoint.node.position = bodyJoint.restPos.add(bodyJoint.up.scale(bob))
-          bodyJoint.node.rotationQuaternion = bodyJoint.rest.multiply(
-            Quaternion.RotationAxis(bodyJoint.hinge, lean)
-          )
-        }
-
-        // Head: one neck thrust per step (2×phase), countering the body rock so
-        // the head holds roughly still between steps — the chicken bob.
-        const neckJoint = neckJointRef.current
-        if (neckJoint) {
-          const headAng = Math.sin(2 * phase) * WALK_HEAD_BOB * blend
-          neckJoint.node.rotationQuaternion = neckJoint.rest.multiply(
-            Quaternion.RotationAxis(neckJoint.hinge, headAng)
-          )
-        }
-
-        // The looping idle clip (a head twitch on Bone.003) fights the chicken
-        // bob, so pause it while actually walking and restore it at a standstill.
-        const walking = blend > 0.2
-        if (walking && !walkIdleStoppedRef.current) {
-          idleAnimRef.current?.stop()
-          walkIdleStoppedRef.current = true
-        } else if (!walking && walkIdleStoppedRef.current) {
-          idleAnimRef.current?.start(true)
-          walkIdleStoppedRef.current = false
-        }
+    // --- Animation driver ---
+    // Pick the Blender clip that matches the current state and play it, switching
+    // only on change so loops keep their phase. On the ground we cross between the
+    // walking-forward cycle (its speed scaled to ground speed) and the standing
+    // walking-idle pose. In the air the wing-float glide is the steady state, with
+    // the wing-flap clip overlaid during takeoff, landing flare, or a cruise flap.
+    if (flapTimerRef.current > 0) flapTimerRef.current -= frameDt
+    const vNow = body.linvel()
+    const hSpeed = Math.hypot(vNow.x, vNow.z)
+    let desired: AnimationGroup | null
+    let loop = true
+    let speedRatio = 1
+    if (gameStore.birdMode === 'grounded') {
+      if (hSpeed > WALK_ANIM_MIN_SPEED) {
+        desired = walkFwdAnimRef.current
+        speedRatio = Math.max(0.4, Math.min(2.2, hSpeed / WALK_ANIM_REF_SPEED))
       } else {
-        // Airborne: reset so the next touchdown eases in from a standstill.
-        walkBlendRef.current = 0
-        walkIdleStoppedRef.current = false
+        desired = walkIdleAnimRef.current
       }
+    } else if (flapTimerRef.current > 0) {
+      // A flap beat is in progress (cruise tap, takeoff, or landing brake).
+      desired = flapAnimRef.current
+      loop = false
+      speedRatio = WING_FLAP_SPEED
+    } else {
+      desired = glideAnimRef.current
     }
+
+    if (desired && desired !== currentAnimRef.current) {
+      currentAnimRef.current?.stop()
+      desired.speedRatio = speedRatio
+      desired.start(loop)
+      currentAnimRef.current = desired
+    }
+    if (desired) desired.speedRatio = speedRatio
 
     const shouldTrail = gameStore.birdMode === 'flying'
     for (const trail of gameStore.trails) {
