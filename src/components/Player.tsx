@@ -260,9 +260,14 @@ export const Player = () => {
       importedRoot.parent = carrier
       importedRoot.position.set(0, 0, 0)
 
-      // Shadow casters
+      // Shadows
       const sg = gameStore.shadowGenerator
-      if (sg) result.meshes.forEach((m) => sg.addShadowCaster(m))
+      if (sg) {
+        result.meshes.forEach((m) => {
+          sg.addShadowCaster(m)
+          m.receiveShadows = true
+        })
+      }
 
       gameStore.mesh = carrier
 

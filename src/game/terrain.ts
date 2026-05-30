@@ -7,8 +7,13 @@ import { OASES } from './oasis.ts'
 // enclosed on every side (no edge-on view of the plane), even on a slope.
 const OASIS_RIM_LIP = 0.9
 
-export const TERRAIN_SIZE = 1600
-export const TERRAIN_SUBDIVISIONS = 192
+// Extended from 1600/192 to 3000/360: the cell size (S/N = 8.33 m) is kept
+// identical, so every sample over the original central area lands on the exact
+// same world position and the existing terrain is unchanged — the larger grid
+// only adds desert further out, big enough to host the ring of rock massifs
+// (rocks.ts) that surrounds the map.
+export const TERRAIN_SIZE = 3000
+export const TERRAIN_SUBDIVISIONS = 360
 
 // Cheap hash-based pseudo-random in [0..1)
 function hash2(x: number, y: number): number {

@@ -153,11 +153,12 @@ export const IntroSequence = () => {
     cam.setTarget(tmpTargetRef.current)
     cam.fov = Scalar.Lerp(start.fov, arc.fov, k)
 
-    // Music holds through the move, then fades once we've arrived on the bird.
+    // Music holds through the move, then fades to 0.2 once we've arrived on the bird.
     if (t >= 1) {
-      musicVolRef.current = Math.max(0, musicVolRef.current - MUSIC_FADE_OUT * dt)
+      const targetVolume = 0.2
+      musicVolRef.current = Math.max(targetVolume, musicVolRef.current - MUSIC_FADE_OUT * dt)
       musicRef.current?.setVolume(musicVolRef.current)
-      if (musicVolRef.current <= 0.001) {
+      if (musicVolRef.current <= targetVolume + 0.001) {
         // Hand the view over to the player's chase camera and step aside.
         scene.activeCamera = arc
         audio.attachListener(scene)

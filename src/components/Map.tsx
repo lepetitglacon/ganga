@@ -8,6 +8,8 @@ import {
   Vector3,
 } from '@babylonjs/core'
 import { Terrain } from './Terrain.tsx'
+import { Rocks } from './Rocks.tsx'
+import { generateRockMesh } from '@/game/rocks.ts'
 import { PLACES, resolvePlaceRadiusFromBBox } from '@/game/places.ts'
 import { gameStore } from '@/game/gameStore.ts'
 import { initRapier, PhysicsWorld } from '@/game/physics.ts'
@@ -155,6 +157,13 @@ export const Map = () => {
         }
       }
 
+      // Procedural rock massif — same triangle soup as the rendered mesh
+      // (generateRockMesh is memoized), already in world space.
+      const rock = generateRockMesh()
+      if (rock.indices.length > 0) {
+        physics.addStaticTrimesh(rock.positions, rock.indices)
+      }
+
       gameStore.physics = physics
     })()
 
@@ -170,5 +179,10 @@ export const Map = () => {
     }
   }, [scene])
 
-  return placesReady ? <Terrain /> : null
+  return placesReady ? (
+    <>
+      <Terrain />
+      <Rocks />
+    </>
+  ) : null
 }
