@@ -108,6 +108,8 @@ export const CameraController = () => {
     const onMouseMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== canvas) return
       if (gameStore.camMode !== 'third') return
+      // The cutscene owns the camera — don't let the mouse steer the bird.
+      if (gameStore.cutscene) return
       // Mouse drives the camera directly
       gameStore.camAlpha -= e.movementX * MOUSE_SENSITIVITY
       gameStore.camBeta = Scalar.Clamp(

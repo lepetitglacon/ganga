@@ -20,6 +20,12 @@ type PlaceLoad = {
   root: TransformNode
 }
 
+// How far from the talking bird the player can stand and still get the
+// "F pour parler" prompt. PAD is added to the bird's own bounding radius; the
+// fallback RADIUS is used when the node has no meshes to measure.
+const NPC_TRIGGER_PAD = 13
+const NPC_TRIGGER_RADIUS = 15
+
 export const Map = () => {
   const scene = useScene()
   // Terrain is mounted only after places are loaded so that flattening can
@@ -80,6 +86,37 @@ export const Map = () => {
       waterMat = createOasisWaterMaterial(scene, { square: true })
       for (const { root } of loaded) registerReservoirs(root, waterMat)
 
+      // Talking bird ("Armature"): build a proximity trigger from its meshes'
+      // world bounds so the cutscene can be started with F when the player
+      // stands nearby, and the cutscene camera knows where to frame it.
+      for (const { root } of loaded) {
+        const armature = root
+          .getDescendants(false)
+          .find((n) => /armature/i.test(n.name)) as TransformNode | undefined
+        if (!armature) continue
+        const childMeshes = armature.getChildMeshes(false)
+        if (childMeshes.length === 0) {
+          armature.computeWorldMatrix(true)
+          gameStore.npcZone = {
+            center: armature.getAbsolutePosition().clone(),
+            radius: NPC_TRIGGER_RADIUS,
+          }
+          break
+        }
+        const min = new Vector3(Infinity, Infinity, Infinity)
+        const max = new Vector3(-Infinity, -Infinity, -Infinity)
+        for (const m of childMeshes) {
+          m.computeWorldMatrix(true)
+          const bb = m.getBoundingInfo().boundingBox
+          min.minimizeInPlace(bb.minimumWorld)
+          max.maximizeInPlace(bb.maximumWorld)
+        }
+        const center = min.add(max).scale(0.5)
+        const radius = Vector3.Distance(min, max) * 0.5 + NPC_TRIGGER_PAD
+        gameStore.npcZone = { center, radius }
+        break
+      }
+
       setPlacesReady(true)
 
       // Wait for Terrain to mount and populate terrainHeights before
@@ -128,6 +165,8 @@ export const Map = () => {
       roots.forEach((r) => r.dispose(false, true))
       gameStore.physics?.dispose()
       gameStore.physics = null
+      gameStore.npcZone = null
+      gameStore.nearNpc = false
     }
   }, [scene])
 

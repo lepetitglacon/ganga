@@ -35,7 +35,10 @@ export const RESERVOIRS: Reservoir[] = []
 
 // How many full bird reserves (gameStore.water = 1) it takes to fill an empty
 // reservoir, and how fast the bird pours while perched (reserve units / second).
-const RESERVOIR_CAPACITY = 3
+// The reservoir holds exactly one full bird reserve. A single perch can't top it
+// up, though: the bird bleeds water on the flight home (drain + flaps), so it
+// arrives with ~1/3 of a load each run — making the quest ~3 round-trips.
+const RESERVOIR_CAPACITY = 1
 const TRANSFER_RATE = 0.4
 
 // Finds every "Reservoir" empty under `root`, wires up its water/mesh children

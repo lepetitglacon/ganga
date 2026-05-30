@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { gameStore } from '@/game/gameStore.ts'
+import { VILLAGE_INTRO_CUTSCENE } from '@/game/cutscene.ts'
 
 export const HUD = () => {
   const [speed, setSpeed] = useState(0)
@@ -7,6 +8,8 @@ export const HUD = () => {
   const [flying, setFlying] = useState(false)
   const [water, setWater] = useState(1)
   const [playing, setPlaying] = useState(false)
+  const [nearNpc, setNearNpc] = useState(false)
+  const [cutsceneStep, setCutsceneStep] = useState(-1)
 
   useEffect(() => {
     let raf = 0
@@ -16,6 +19,8 @@ export const HUD = () => {
       setFlying(gameStore.birdMode !== 'grounded')
       setWater(gameStore.water)
       setPlaying(gameStore.phase === 'playing')
+      setNearNpc(gameStore.nearNpc)
+      setCutsceneStep(gameStore.cutscene ? gameStore.cutscene.step : -1)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -24,6 +29,43 @@ export const HUD = () => {
 
   // Stay out of the way during the loading screen / cinematic intro.
   if (!playing) return null
+
+  // During a cutscene the dialogue box takes over the whole HUD.
+  if (cutsceneStep >= 0) {
+    const line = VILLAGE_INTRO_CUTSCENE[cutsceneStep]?.text ?? ''
+    return (
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          fontFamily: 'system-ui, sans-serif',
+          color: '#fff',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 48,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'min(680px, 80vw)',
+            padding: '22px 28px',
+            borderRadius: 14,
+            border: '1px solid rgba(255,255,255,0.25)',
+            background: 'rgba(0,0,0,0.62)',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: 21, lineHeight: 1.5, fontWeight: 500 }}>{line}</div>
+          <div style={{ marginTop: 14, fontSize: 12, letterSpacing: 1, opacity: 0.55 }}>
+            F · ESPACE · CLIC POUR CONTINUER
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const onCooldown = cooldown > 0
   const disabled = !flying || onCooldown
@@ -106,6 +148,26 @@ export const HUD = () => {
           </span>
         )}
       </div>
+
+      {nearNpc && !flying && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 90,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '10px 20px',
+            borderRadius: 10,
+            border: '1px solid rgba(255,255,255,0.5)',
+            background: 'rgba(0,0,0,0.5)',
+            fontSize: 15,
+            letterSpacing: 1,
+            fontWeight: 600,
+          }}
+        >
+          <span style={{ opacity: 0.9 }}>F</span> pour parler
+        </div>
+      )}
     </div>
   )
 }

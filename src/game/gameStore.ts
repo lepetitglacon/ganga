@@ -1,4 +1,4 @@
-import type { ArcRotateCamera, ShadowGenerator, TrailMesh, TransformNode } from '@babylonjs/core'
+import type { ArcRotateCamera, ShadowGenerator, TrailMesh, TransformNode, Vector3 } from '@babylonjs/core'
 import type { PhysicsWorld } from './physics.ts'
 import type { StormConfig } from './storm.ts'
 
@@ -59,4 +59,13 @@ export const gameStore = {
   // Per-frame summary written by Player: max wall proximity across all storms.
   // 0 = outside any storm wall, 1 = dead center of a wall. Used for fog/HUD.
   stormProximity: 0,
+  // --- Village NPC interaction + cutscene ---
+  // Proximity trigger around the talking bird ("Armature") in the village.
+  // Set by Map once the GLB loads. center/radius is the XZ proximity test; the
+  // cutscene camera frames `center`.
+  npcZone: null as { center: Vector3; radius: number } | null,
+  // True while the grounded player stands inside npcZone — HUD shows "F pour parler".
+  nearNpc: false,
+  // Non-null while the village intro cutscene plays; `step` indexes the dialogue.
+  cutscene: null as { step: number } | null,
 }
