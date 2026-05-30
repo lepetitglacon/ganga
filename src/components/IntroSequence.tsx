@@ -19,7 +19,7 @@ function releaseCamera(scene: Scene, cam: UniversalCamera): void {
 const INTRO_MUSIC_URL = '/sound/ambiance/intro.mp3'
 const INTRO_MUSIC_VOLUME = 0.55
 const MUSIC_FADE_IN = 0.4 // volume/s while the cinematic plays
-const MUSIC_FADE_OUT = 0.45 // volume/s once we land on the player
+const MUSIC_FADE_OUT = 0.35 // volume/s once we land on the player
 
 // Cinematic orbit: a slow, high pan circling the spawn so the dunes drift past.
 const ORBIT_RADIUS = 170
@@ -155,7 +155,7 @@ export const IntroSequence = () => {
 
     // Music holds through the move, then fades to 0.2 once we've arrived on the bird.
     if (t >= 1) {
-      const targetVolume = 0.2
+      const targetVolume = 0
       musicVolRef.current = Math.max(targetVolume, musicVolRef.current - MUSIC_FADE_OUT * dt)
       musicRef.current?.setVolume(musicVolRef.current)
       if (musicVolRef.current <= targetVolume + 0.001) {

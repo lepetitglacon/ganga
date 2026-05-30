@@ -323,6 +323,7 @@ const EDGE: [number, number][] = [
 export type RockMesh = {
   positions: Float32Array
   indices: Uint32Array
+  colors: Float32Array
 }
 
 // Mesh one massif and append its geometry to the running arrays.
@@ -330,6 +331,10 @@ function meshMassif(
   m: Massif,
   positions: number[],
   indices: number[],
+  // Per-vertex baked data, pushed in lockstep with positions: cavity occlusion
+  // 0..1 (1 = deep in rock) and the outward normal's Y (1 = flat top, 0 = wall).
+  occOut: number[],
+  nyOut: number[],
 ): void {
   const minX = m.cx - m.halfX
   const minZ = m.cz - m.halfZ
@@ -408,6 +413,43 @@ function meshMassif(
           yMin + (iy + py * inv) * CELL,
           minZ + (iz + pz * inv) * CELL,
         )
+
+        // Baked cavity AO: fraction of a 5³ field neighbourhood that is solid
+        // (field > 0). A flat exposed wall is ~half solid; a crevice/canyon
+        // floor is mostly enclosed → higher. Reaches ~2 cells (10 m) so it
+        // reads canyon depth, not just micro-contacts. View-independent, so no
+        // screen-space artifact like SSAO.
+        let solidCount = 0
+        let total = 0
+        for (let oz = -2; oz <= 2; oz++) {
+          const zz = iz + oz
+          if (zz < 0 || zz >= sz) continue
+          for (let oy = -2; oy <= 2; oy++) {
+            const yy = iy + oy
+            if (yy < 0 || yy >= sy) continue
+            for (let ox = -2; ox <= 2; ox++) {
+              const xx = ix + ox
+              if (xx < 0 || xx >= sx) continue
+              total++
+              if (field[fIdx(xx, yy, zz)] > 0) solidCount++
+            }
+          }
+        }
+        occOut.push(total > 0 ? solidCount / total : 0)
+
+        // Outward normal via the field gradient (inside is field > 0, so the
+        // surface normal points down-gradient). Only Y is needed, for slope tint.
+        const xp = Math.min(ix + 1, sx - 1)
+        const xm = Math.max(ix - 1, 0)
+        const yp = Math.min(iy + 1, sy - 1)
+        const ym = Math.max(iy - 1, 0)
+        const zp = Math.min(iz + 1, sz - 1)
+        const zm = Math.max(iz - 1, 0)
+        const gx = field[fIdx(xp, iy, iz)] - field[fIdx(xm, iy, iz)]
+        const gy = field[fIdx(ix, yp, iz)] - field[fIdx(ix, ym, iz)]
+        const gz = field[fIdx(ix, iy, zp)] - field[fIdx(ix, iy, zm)]
+        const glen = Math.hypot(gx, gy, gz) || 1
+        nyOut.push(-gy / glen)
       }
     }
   }
@@ -473,13 +515,33 @@ export function generateRockMesh(): RockMesh {
 
   const positions: number[] = []
   const indices: number[] = []
+  const occ: number[] = []
+  const ny: number[] = []
   for (const m of buildRange()) {
-    meshMassif(m, positions, indices)
+    meshMassif(m, positions, indices, occ, ny)
+  }
+
+  // Build per-vertex albedo: ochre wall → lighter sandy caprock on flat tops,
+  // multiplied by baked cavity AO so canyons/crevices darken with depth. This
+  // replaces the screen-space SSAO look with view-stable shading that still
+  // reacts to the sun via the mesh normals.
+  const colors = new Float32Array((positions.length / 3) * 4)
+  for (let v = 0, c = 0; v < occ.length; v++, c += 4) {
+    const topness = Math.max(0, Math.min(1, ny[v])) // 0 wall .. 1 flat top
+    const ao = 1 - smoothstep(0.5, 0.9, occ[v]) * 0.65 // 1 exposed .. 0.35 deep
+    const r = (0.78 + (0.9 - 0.78) * topness) * ao
+    const g = (0.5 + (0.71 - 0.5) * topness) * ao
+    const b = (0.29 + (0.47 - 0.29) * topness) * ao
+    colors[c] = r
+    colors[c + 1] = g
+    colors[c + 2] = b
+    colors[c + 3] = 1
   }
 
   cached = {
     positions: new Float32Array(positions),
     indices: new Uint32Array(indices),
+    colors,
   }
   return cached
 }

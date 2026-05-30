@@ -8,6 +8,14 @@ import { getTerrainHeight } from '@/game/terrain.ts'
 // (x, z), so it never clips underground when orbiting low.
 const CAMERA_GROUND_MARGIN = 2
 
+// Camera obstacle avoidance: cast from the look target out to the camera and,
+// if a physics collider (rock walls, structures, dunes) is closer than the
+// orbit radius, pull the camera in to sit just in front of it — so the bird is
+// never hidden behind geometry. Pull-in is instant; pull-out eases back via the
+// normal radius lerp.
+const CAMERA_COLLISION_MARGIN = 0.5
+const CAMERA_MIN_RADIUS = 1.2
+
 const MOUSE_SENSITIVITY = 0.002
 // Near-full vertical orbit; epsilons avoid gimbal lock at the poles.
 const BETA_MIN = 0.05
@@ -81,7 +89,9 @@ export const CameraController = () => {
       Vector3.Zero(),
       scene
     )
-    arcCam.lowerRadiusLimit = 3
+    // Low lower-limit so obstacle avoidance can squeeze the camera in close
+    // inside narrow canyons without Babylon re-clamping the radius back out.
+    arcCam.lowerRadiusLimit = CAMERA_MIN_RADIUS
     arcCam.upperRadiusLimit = RADIUS_MAX
     arcCam.lowerBetaLimit = BETA_MIN
     arcCam.upperBetaLimit = BETA_MAX
@@ -302,6 +312,21 @@ export const CameraController = () => {
       baseTargetRef.current.y - upY * offU + liftY + groundLiftRef.current,
       baseTargetRef.current.z - rightZ * offR - upZ * offU,
     )
+
+    // --- Obstacle avoidance: keep the camera in front of physics colliders ---
+    // The camera sits at target + radius·dir, where dir points from the look
+    // target out along the orbit. Cast that segment against the physics world
+    // (the player body is filtered out) and, on a hit, pull the radius in so
+    // the camera never ends up behind a rock wall with the bird occluded.
+    const phys = gameStore.physics
+    if (phys?.playerBody) {
+      const dir = { x: ca * sb, y: cb, z: sa * sb } // unit (sb²+cb²=1)
+      const origin = { x: cam.target.x, y: cam.target.y, z: cam.target.z }
+      const hit = phys.raycast(origin, dir, cam.radius)
+      if (hit != null) {
+        cam.radius = Math.max(CAMERA_MIN_RADIUS, hit - CAMERA_COLLISION_MARGIN)
+      }
+    }
   })
 
   return null

@@ -13,7 +13,7 @@ export const Rocks = () => {
   useEffect(() => {
     if (!scene) return
 
-    const { positions, indices } = generateRockMesh()
+    const { positions, indices, colors } = generateRockMesh()
     const normals: number[] = []
     VertexData.ComputeNormals(positions, indices, normals)
 
@@ -21,28 +21,27 @@ export const Rocks = () => {
     vd.positions = positions as unknown as number[]
     vd.indices = indices as unknown as number[]
     vd.normals = normals
+    vd.colors = colors as unknown as number[]
 
     const mesh = new Mesh('rocks', scene)
     vd.applyToMesh(mesh)
+    // Albedo comes from baked vertex colors (ochre + slope tint + cavity AO).
+    mesh.useVertexColors = true
 
-    // Same flat, lit look as the sand terrain (Terrain.tsx) but ochre — so the
-    // relief reads from lighting on the geometry, not a baked strata pattern.
-    // No vertex colors: the old per-vertex strata looked like a static shader
-    // and, being dark, dimmed the semi-transparent wing trails passing in front.
     const mat = new StandardMaterial('rockMat', scene)
-    mat.diffuseColor = new Color3(0.82, 0.56, 0.32)
-    mat.specularColor = new Color3(0.12, 0.09, 0.05)
-    mat.specularPower = 48
+    mat.diffuseColor = new Color3(1, 1, 1) // multiplies the vertex colors
+    mat.specularColor = new Color3(0.14, 0.1, 0.06)
+    mat.specularPower = 32
     // Surface Nets winding isn't guaranteed outward-facing everywhere; drawing
     // both sides avoids holes from accidentally flipped triangles.
     mat.backFaceCulling = false
     mesh.material = mat
     mesh.receiveShadows = true
 
-    // Exclude the rock from the SSAO prepass. The deep carved canyons/overhangs
-    // generate huge screen-space ambient occlusion, which saturated the massif
-    // to near-black with a screen-fixed AO pattern. Same trick the wing trails
-    // use (Player.tsx). The rock still renders normally in the forward pass.
+    // Keep the rock out of the SSAO prepass: its deep carved canyons saturated
+    // the screen-space AO to an ugly near-black pattern. Depth shading now comes
+    // from the baked vertex AO instead. (Same prepass-exclusion the wing trails
+    // use in Player.tsx.) SSAO still applies to the rest of the scene.
     const prePass = scene.prePassRenderer
     if (prePass) prePass.excludedMaterials.push(mat)
 
