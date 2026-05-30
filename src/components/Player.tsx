@@ -200,7 +200,7 @@ export const Player = () => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return
       // Frozen during a cutscene — Space advances the dialogue, not takeoff.
-      if (gameStore.cutscene) return
+      if (gameStore.cutscene || gameStore.villageCelebration) return
       e.preventDefault()
       if (gameStore.birdMode === 'grounded') {
         // Active takeoff: scripted 2–3 flaps before free flight kicks in.
@@ -378,8 +378,8 @@ export const Player = () => {
       subSteps++
 
     if (gameStore.birdMode === 'grounded') {
-      if (gameStore.cutscene) {
-        // Frozen in place while the dialogue plays — kill any inherited skid.
+      if (gameStore.cutscene || gameStore.villageCelebration) {
+        // Frozen in place during a cinematic — kill any inherited skid.
         const lv = body.linvel()
         body.setLinvel({ x: 0, y: lv.y, z: 0 }, true)
       } else if (gameStore.camMode === 'third') {

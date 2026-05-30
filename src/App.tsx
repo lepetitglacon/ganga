@@ -19,6 +19,7 @@ import { PlaceAmbience } from './components/PlaceAmbience.tsx'
 import { LensFlareComponent } from './components/LensFlare.tsx'
 import { IntroSequence } from './components/IntroSequence.tsx'
 import { Cutscene } from './components/Cutscene.tsx'
+import { VillageCelebration } from './components/VillageCelebration.tsx'
 import { Loader } from './components/Loader.tsx'
 import { MuteButton } from './components/MuteButton.tsx'
 
@@ -36,6 +37,7 @@ export default function App() {
           <CameraController />
           <IntroSequence />
           <Cutscene />
+          <VillageCelebration />
           <PostProcess />
           <Player />
           <WaterDrops />

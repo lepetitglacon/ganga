@@ -29,6 +29,9 @@ export type Reservoir = {
   topY: number
   // Current fill, 0..1.
   fill: number
+  // Latched once the reservoir first reaches 100%, so the celebration only
+  // fires a single time.
+  completed: boolean
 }
 
 export const RESERVOIRS: Reservoir[] = []
@@ -81,6 +84,7 @@ export function registerReservoirs(root: Node, waterMat: ShaderMaterial): void {
       baseY,
       topY: max.y,
       fill: 0,
+      completed: false,
     })
   }
 }
@@ -109,6 +113,11 @@ export function updateReservoirs(
       gameStore.water -= amount
       r.fill = Math.min(1, r.fill + amount / RESERVOIR_CAPACITY)
       transferring = true
+      // First time this reservoir tops off: fire the village celebration once.
+      if (!r.completed && r.fill >= 1) {
+        r.completed = true
+        gameStore.reservoirJustFilled = true
+      }
     }
     r.waterMesh.position.y = r.baseY + (r.topY - r.baseY) * r.fill
   }

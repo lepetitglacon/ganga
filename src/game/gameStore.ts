@@ -68,4 +68,11 @@ export const gameStore = {
   nearNpc: false,
   // Non-null while the village intro cutscene plays; `step` indexes the dialogue.
   cutscene: null as { step: number } | null,
+  // One-shot event: set true the frame a reservoir first reaches 100%. The
+  // VillageCelebration component consumes it (sets it back to false) to kick off
+  // its camera tour + water geysers.
+  reservoirJustFilled: false,
+  // True while the village celebration camera tour is playing (input frozen,
+  // camera taken over) — same gating as `cutscene`.
+  villageCelebration: false,
 }
