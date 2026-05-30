@@ -3,7 +3,6 @@ import { useScene } from 'react-babylonjs'
 import {
   GlowLayer,
   MeshBuilder,
-  Vector3,
   Color3,
   StandardMaterial,
 } from '@babylonjs/core'
@@ -18,7 +17,7 @@ export const LensFlareComponent = () => {
     // Glow layer pour l'effet de bloom
     const glow = new GlowLayer('glow', scene)
     glow.intensity = 1.0
-    glow.blurKernel = 64
+    glow.blurKernelSize = 64
 
     // Créer un mesh invisible du soleil pour le lens flare
     // Positionner selon la direction du soleil
@@ -34,7 +33,7 @@ export const LensFlareComponent = () => {
     // Material émissif pour le glow
     const sunMat = new StandardMaterial('sun-material', scene)
     sunMat.emissiveColor = new Color3(1.0, 0.88, 0.7)
-    sunMat.renderingGroupId = 1
+    sunMesh.renderingGroupId = 1
     sunMesh.material = sunMat
 
     // Ajouter au glow layer
