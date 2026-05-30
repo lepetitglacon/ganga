@@ -50,6 +50,12 @@ const LEAD_LERP = 4.5
 const RECENTER_LERP = 6
 const RECENTER_EPS = 0.005
 
+// On the ground, nudge the look-target a touch above the bird so it sits a
+// little lower in frame (more headroom). Eased in/out so the transition to and
+// from flight is smooth.
+const GROUNDED_TARGET_LIFT = 3 // meters
+const GROUNDED_LIFT_LERP = 4
+
 export const CameraController = () => {
   const scene = useScene()
   const lastTimeRef = useRef(performance.now())
@@ -60,6 +66,8 @@ export const CameraController = () => {
   const baseTargetRef = useRef(new Vector3(0, 0, 0))
   // Smoothed bird NDC position. Drives the world target offset each frame.
   const screenLeadRef = useRef({ sx: 0, sy: 0 })
+  // Smoothed vertical look-target lift, eased in while grounded.
+  const groundLiftRef = useRef(0)
 
   useEffect(() => {
     if (!scene) return
@@ -282,9 +290,14 @@ export const CameraController = () => {
       if (camY < minY) liftY = minY - camY
     }
 
+    // Mini upward look-target offset while grounded, eased in/out.
+    const targetGroundLift = gameStore.birdMode === 'grounded' ? GROUNDED_TARGET_LIFT : 0
+    groundLiftRef.current +=
+      (targetGroundLift - groundLiftRef.current) * (1 - Math.exp(-GROUNDED_LIFT_LERP * dt))
+
     cam.target.set(
       baseTargetRef.current.x - rightX * offR - upX * offU,
-      baseTargetRef.current.y - upY * offU + liftY,
+      baseTargetRef.current.y - upY * offU + liftY + groundLiftRef.current,
       baseTargetRef.current.z - rightZ * offR - upZ * offU,
     )
   })

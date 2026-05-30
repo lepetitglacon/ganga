@@ -119,6 +119,12 @@ const LANDING_MIN_SPEED = 1.0 // m/s — below this, skip the ray (degenerate di
 const LANDING_FLAP_INTERVAL = 0.25 // seconds between flap.mp3 plays during landing flare
 const LANDING_FLAP_PLAYBACK_RATE = 1.5 // playback speed multiplier during landing
 
+// Ground brake flaps: after touchdown the bird keeps beating its wings to brake
+// for as long as it's still skidding faster than a normal walk. The flaps stop
+// on their own once the slide bleeds down to walking speed.
+const GROUND_SKID_FLAP_MIN_SPEED = WALK_SPEED + 0.5 // m/s — above a normal walk
+const GROUND_SKID_FLAP_INTERVAL = 0.3 // seconds between brake flaps on the ground
+
 // Thermal updraft tuning.
 // Thermals form over sun-facing slopes (warm rising air). We measure that
 // via dot(terrainNormal, sunDir); only the positive side counts.
@@ -166,6 +172,8 @@ export const Player = () => {
   const flapTimerRef = useRef(0)
   // Braking flaps still to fire during a landing approach (set from speed).
   const landingFlapsLeftRef = useRef(0)
+  // Countdown to the next brake flap while skidding to a stop on the ground.
+  const groundFlapTimerRef = useRef(0)
 
   // Fire one wing-flap beat: restart the clip sped up so it lasts one beat, and
   // mark it the current clip. Used by the cruise flap, takeoff, and landing.
@@ -290,6 +298,10 @@ export const Player = () => {
         trailMat.disableLighting = true
         trailMat.backFaceCulling = false
         trailMat.alpha = 0.55
+        // Keep the glowing ribbon out of the SSAO pass: the thin folded geometry
+        // self-occludes and SSAO paints ugly dark streaks on it. Excluding the
+        // material from the prepass means SSAO never sees the trail.
+        scene.prePassRenderer?.excludedMaterials.push(trailMat)
 
         const diameter = wingSpan * 0.04
         const trailL = new TrailMesh('trailL', tipL, scene, diameter, 120, false)
@@ -395,6 +407,21 @@ export const Player = () => {
           }
         }
       }
+      // Brake flaps: still sliding faster than a walk after touchdown → keep
+      // beating the wings to wash off the speed. Stops once the skid decays to
+      // walking pace.
+      const lvSkid = body.linvel()
+      if (Math.hypot(lvSkid.x, lvSkid.z) > GROUND_SKID_FLAP_MIN_SPEED) {
+        groundFlapTimerRef.current -= dt
+        if (groundFlapTimerRef.current <= 0) {
+          triggerFlap()
+          audio.playOneShotPooled(FLAP_SOUND_URL, 5, { playbackRate: LANDING_FLAP_PLAYBACK_RATE })
+          groundFlapTimerRef.current = GROUND_SKID_FLAP_INTERVAL
+        }
+      } else {
+        groundFlapTimerRef.current = 0
+      }
+
       // Passive takeoff: walked off an edge → switch to flying without the
       // scripted flap sequence. Gravity off, current velocity preserved.
       if (!physics.isNearGround(GROUND_MARGIN_LEAVE)) {
@@ -520,6 +547,7 @@ export const Player = () => {
         gameStore.thermal = 0
         flapBoostRef.current = 0
         flapCooldownRef.current = 0
+        groundFlapTimerRef.current = 0 // fire the first brake flap immediately
         body.setGravityScale(1, true)
         // Preserve full horizontal momentum at touchdown. Any cap here causes
         // a discontinuous speed drop that the FOV (speed-driven) makes obvious.
@@ -674,7 +702,12 @@ export const Player = () => {
     let loop = true
     let speedRatio = 1
     if (gameStore.birdMode === 'grounded') {
-      if (hSpeed > WALK_ANIM_MIN_SPEED) {
+      if (flapTimerRef.current > 0) {
+        // Brake-flap beat while skidding to a stop — overrides the walk cycle.
+        desired = flapAnimRef.current
+        loop = false
+        speedRatio = WING_FLAP_SPEED
+      } else if (hSpeed > WALK_ANIM_MIN_SPEED) {
         desired = walkFwdAnimRef.current
         speedRatio = Math.max(0.4, Math.min(2.2, hSpeed / WALK_ANIM_REF_SPEED))
       } else {
@@ -697,10 +730,15 @@ export const Player = () => {
     }
     if (desired) desired.speedRatio = speedRatio
 
-    const shouldTrail = gameStore.birdMode === 'flying'
+    // Wing trails show during the takeoff flaps and free flight. On (re)enable
+    // we reset() first so the ribbon collapses to the wing's current position —
+    // otherwise it streaks in from wherever the last flight ended.
+    const shouldTrail =
+      gameStore.birdMode === 'flying' || gameStore.birdMode === 'takingOff'
     for (const trail of gameStore.trails) {
       if (shouldTrail && !trail.isEnabled()) {
         trail.setEnabled(true)
+        trail.reset()
         trail.start()
       } else if (!shouldTrail && trail.isEnabled()) {
         trail.stop()
