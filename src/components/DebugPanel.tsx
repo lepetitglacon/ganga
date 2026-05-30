@@ -6,6 +6,7 @@ import {
   subscribeDebugPanel,
   type DebugCategory,
 } from '@/game/debug.ts'
+import { gameStore } from '@/game/gameStore.ts'
 
 function snapshot(): Record<DebugCategory, boolean> {
   return {
@@ -18,8 +19,22 @@ function snapshot(): Record<DebugCategory, boolean> {
 
 export const DebugPanel = () => {
   const [state, setState] = useState<Record<DebugCategory, boolean>>(snapshot)
+  const [playing, setPlaying] = useState(false)
 
   useEffect(() => subscribeDebugPanel(() => setState(snapshot())), [])
+
+  useEffect(() => {
+    let raf = 0
+    const tick = () => {
+      setPlaying(gameStore.phase === 'playing')
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
+  // Hidden during the loading screen / cinematic intro.
+  if (!playing) return null
 
   return (
     <div

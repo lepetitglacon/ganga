@@ -3,6 +3,12 @@ import type { PhysicsWorld } from './physics.ts'
 import type { StormConfig } from './storm.ts'
 
 export const gameStore = {
+  // Startup flow. 'intro' = loading screen + cinematic desert fly-over; flips to
+  // 'playing' when the player clicks "Jouer" (IntroSequence then lerps the
+  // camera onto the bird and fades the intro music out). assetsReady goes true
+  // once the world + bird are loaded, which is what swaps "Chargement" → "Jouer".
+  phase: 'intro' as 'intro' | 'playing',
+  assetsReady: false,
   mesh: null as TransformNode | null,
   physics: null as PhysicsWorld | null,
   terrainHeights: null as Float32Array | null,

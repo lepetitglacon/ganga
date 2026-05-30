@@ -35,6 +35,22 @@ class AudioManager {
   private attachedCamera: Camera | null = null
   private oneShotCache = new Map<string, Promise<StaticSound>>()
   private soundPoolCache = new Map<string, { sounds: StaticSound[]; index: number }>()
+  private muted = false
+
+  // Master mute. Unmuting also unlocks the engine (browsers keep it locked
+  // until a user gesture — the click on the mute button counts), so the button
+  // doubles as the "enable sound" affordance on first load.
+  setMuted(muted: boolean): void {
+    this.muted = muted
+    void this.ensureEngine().then((eng) => {
+      eng.volume = muted ? 0 : 1
+      if (!muted) eng.unlockAsync().catch(() => {})
+    })
+  }
+
+  isMuted(): boolean {
+    return this.muted
+  }
 
   private ensureEngine(): Promise<AudioEngineV2> {
     if (this.engineP) return this.engineP

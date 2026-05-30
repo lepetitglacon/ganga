@@ -17,6 +17,9 @@ import { HUD } from './components/HUD.tsx'
 import { DebugPanel } from './components/DebugPanel.tsx'
 import { PlaceAmbience } from './components/PlaceAmbience.tsx'
 import { LensFlareComponent } from './components/LensFlare.tsx'
+import { IntroSequence } from './components/IntroSequence.tsx'
+import { Loader } from './components/Loader.tsx'
+import { MuteButton } from './components/MuteButton.tsx'
 
 export default function App() {
   return (
@@ -30,6 +33,7 @@ export default function App() {
           <Water />
           <WetnessMask />
           <CameraController />
+          <IntroSequence />
           <PostProcess />
           <Player />
           <WaterDrops />
@@ -42,6 +46,8 @@ export default function App() {
       </Engine>
       <HUD />
       <DebugPanel />
+      <Loader />
+      <MuteButton />
     </div>
   )
 }

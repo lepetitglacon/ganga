@@ -136,7 +136,10 @@ const ORIENT_SMOOTHING = 4.5 // lower = floatier rotation
 
 function makeSpawn(): Vector3 {
   const groundY = getTerrainHeight(0, 0)
-  return new Vector3(0, groundY + CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS + 1, 0)
+  // Rest the capsule exactly on the ground. Any extra clearance leaves the bird
+  // far enough above terrain that isNearGround(GROUND_MARGIN_LEAVE) fails on the
+  // first frame, which would flip it into 'flying' at launch.
+  return new Vector3(0, groundY + CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS, 0)
 }
 
 export const Player = () => {
@@ -300,6 +303,8 @@ export const Player = () => {
 
       gameStore.physics.createPlayerBody(spawn.x, spawn.y, spawn.z)
       lastTimeRef.current = performance.now()
+      // World + bird are live: the loader can now offer "Jouer".
+      gameStore.assetsReady = true
     }
 
     setup().catch(console.error)

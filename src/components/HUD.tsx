@@ -6,6 +6,7 @@ export const HUD = () => {
   const [cooldown, setCooldown] = useState(0)
   const [flying, setFlying] = useState(false)
   const [water, setWater] = useState(1)
+  const [playing, setPlaying] = useState(false)
 
   useEffect(() => {
     let raf = 0
@@ -14,11 +15,15 @@ export const HUD = () => {
       setCooldown(gameStore.flapCooldown)
       setFlying(gameStore.birdMode !== 'grounded')
       setWater(gameStore.water)
+      setPlaying(gameStore.phase === 'playing')
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [])
+
+  // Stay out of the way during the loading screen / cinematic intro.
+  if (!playing) return null
 
   const onCooldown = cooldown > 0
   const disabled = !flying || onCooldown
