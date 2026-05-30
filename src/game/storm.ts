@@ -194,6 +194,6 @@ export function makeDefaultStorm(groundY: number): StormConfig {
     noiseScrollSpeed: 2.2,
     streakMix: .5,
 
-    windAngularSpeed: 0.1,
+    windAngularSpeed: 0.5,
   }
 }

@@ -11,10 +11,13 @@ import { Terrain } from './Terrain.tsx'
 import { PLACES, resolvePlaceRadiusFromBBox } from '@/game/places.ts'
 import { gameStore } from '@/game/gameStore.ts'
 import { initRapier, PhysicsWorld } from '@/game/physics.ts'
+import { createOasisWaterMaterial } from '@/game/oasisWaterMaterial.ts'
+import { registerReservoirs, clearReservoirs } from '@/game/reservoir.ts'
 
 type PlaceLoad = {
   meshes: AbstractMesh[]
   carrier: TransformNode
+  root: TransformNode
 }
 
 export const Map = () => {
@@ -28,6 +31,7 @@ export const Map = () => {
     let cancelled = false
     const roots: TransformNode[] = []
     const loaded: PlaceLoad[] = []
+    let waterMat: ReturnType<typeof createOasisWaterMaterial> | null = null
 
     ;(async () => {
       await initRapier()
@@ -65,11 +69,17 @@ export const Map = () => {
           }
 
           roots.push(carrier)
-          loaded.push({ meshes: result.meshes, carrier })
+          loaded.push({ meshes: result.meshes, carrier, root: importedRoot })
         })
       )
 
       if (cancelled) return
+
+      // Reservoirs: detach + shade the "water" level meshes (same material as
+      // the oases) and register their trigger footprints for fill logic.
+      waterMat = createOasisWaterMaterial(scene, { square: true })
+      for (const { root } of loaded) registerReservoirs(root, waterMat)
+
       setPlacesReady(true)
 
       // Wait for Terrain to mount and populate terrainHeights before
@@ -84,6 +94,9 @@ export const Map = () => {
       // Bake each place mesh into a world-space trimesh collider.
       for (const { meshes } of loaded) {
         for (const m of meshes) {
+          // The reservoir "water" surface is visual-only — skip it (it's also
+          // been detached from the hierarchy by registerReservoirs).
+          if (/^water/i.test(m.name)) continue
           const positions = m.getVerticesData(VertexBuffer.PositionKind)
           const idx = m.getIndices()
           if (!positions || !idx || positions.length === 0 || idx.length === 0) continue
@@ -110,6 +123,8 @@ export const Map = () => {
 
     return () => {
       cancelled = true
+      clearReservoirs()
+      waterMat?.dispose()
       roots.forEach((r) => r.dispose(false, true))
       gameStore.physics?.dispose()
       gameStore.physics = null

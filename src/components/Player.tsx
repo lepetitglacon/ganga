@@ -19,6 +19,7 @@ import { gameStore } from '@/game/gameStore.ts'
 import { useKeyboard } from '@/hooks/useKeyboard.ts'
 import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
 import { OASES } from '@/game/oasis.ts'
+import { updateReservoirs } from '@/game/reservoir.ts'
 import { SUN_DIR } from '@/game/world.ts'
 import { applyStormForce, sampleStorm } from '@/game/storm.ts'
 import { audio } from '@/game/audio.ts'
@@ -517,6 +518,12 @@ export const Player = () => {
     gameStore.feetWet = feetWetRef.current
 
     gameStore.inWater = inWater
+
+    // --- Village reservoirs ---
+    // While perched inside a reservoir's footprint, pour the bird's hydration
+    // into it (raising its water level). Also drives the lerp every frame.
+    updateReservoirs(tp, gameStore.birdMode === 'grounded', dt)
+
     // Wading loop plays only while moving through the water; silent when still.
     const wadingTarget = inWater && moving ? 1 : 0
     wadingVolRef.current += (wadingTarget - wadingVolRef.current) * Math.min(1, dt * 6)
