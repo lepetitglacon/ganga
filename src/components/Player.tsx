@@ -60,7 +60,18 @@ const FIXED_DT = 1 / 60
 const MAX_SUB_STEPS = 5
 
 const WALK_SPEED = 5
-const FLIGHT_SPEED = 14
+const FLIGHT_SPEED = 14 // cruise airspeed (m/s) — level flight settles here
+// Light flight realism: airspeed is no longer constant. Gravity acts along the
+// flight path, so a climb trades speed for altitude and a dive trades altitude
+// for speed.
+//   - Climbing (pitch > 0): gravity bleeds airspeed, floored at MIN_FLIGHT_SPEED.
+//   - Diving (pitch < 0): gravity builds airspeed with no cap (free-fall).
+//   - Level: a gentle wing "thrust" recovers cruise speed when below it, so the
+//     bird doesn't stay stuck slow after a climb.
+const MIN_FLIGHT_SPEED = 10 // m/s floor while climbing (≈36 km/h on the HUD)
+const MAX_SPEED = 200 / 3.6 // 200 km/h hard cap (≈55.6 m/s) — applies to dives AND storm boosts
+const FLIGHT_GRAVITY = 9.81 // m/s² along the flight path
+const CRUISE_RECOVERY = 0.5 // 1/s — how fast airspeed recovers toward cruise
 // Ground "skid" after landing or after WASD release. Constant linear
 // deceleration so the skid duration scales with the speed at touchdown:
 // at FLIGHT_SPEED the slide lasts ~4s; at WALK_SPEED it tapers in ~1.4s.
@@ -124,6 +135,7 @@ export const Player = () => {
   const bankRef = useRef(0)
   const flightTimeRef = useRef(0)
   const landingFlapTimerRef = useRef(0)
+  const flightSpeedRef = useRef(FLIGHT_SPEED)
   const flapBoostRef = useRef(0)
   const flapCooldownRef = useRef(0)
   const flyAnimRef = useRef<AnimationGroup | null>(null)
@@ -155,15 +167,18 @@ export const Player = () => {
         flapCooldownRef.current = FLAP_COOLDOWN
         flyAnimRef.current?.start(false)
         audio.playOneShot(FLAP_SOUND_URL)
-        // Shed water on the beat: drain hydration and hand the droplet burst
-        // the bird's current velocity so the drops fly off along its heading.
-        gameStore.water = Math.max(0, gameStore.water - FLAP_WATER_COST)
-        const body = gameStore.physics?.playerBody
-        if (body) {
-          const lv = body.linvel()
-          gameStore.flapVel = { x: lv.x, y: lv.y, z: lv.z }
+        // Shed water on the beat — but only if the bird actually carries any.
+        // Drain hydration and hand the droplet burst the bird's current velocity
+        // so the drops fly off along its heading. Dry bird → no droplets.
+        if (gameStore.water > 0) {
+          gameStore.water = Math.max(0, gameStore.water - FLAP_WATER_COST)
+          const body = gameStore.physics?.playerBody
+          if (body) {
+            const lv = body.linvel()
+            gameStore.flapVel = { x: lv.x, y: lv.y, z: lv.z }
+          }
+          gameStore.flapId++
         }
-        gameStore.flapId++
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -352,6 +367,8 @@ export const Player = () => {
       if (!physics.isNearGround(GROUND_MARGIN_LEAVE)) {
         gameStore.birdMode = 'flying'
         body.setGravityScale(0, true)
+        const lv = body.linvel()
+        flightSpeedRef.current = Math.max(MIN_FLIGHT_SPEED, Math.hypot(lv.x, lv.z))
       }
     }
 
@@ -374,6 +391,8 @@ export const Player = () => {
       }
       if (takeoffFlapsLeftRef.current <= 0 && takeoffNextFlapRef.current <= 0) {
         gameStore.birdMode = 'flying'
+        const lv = body.linvel()
+        flightSpeedRef.current = Math.max(MIN_FLIGHT_SPEED, Math.hypot(lv.x, lv.z))
       }
     }
 
@@ -400,13 +419,32 @@ export const Player = () => {
       }
       gameStore.thermal = thermal
 
+      // --- Airspeed dynamics (light realism) ---
+      // Gravity projected onto the flight path: climbing (pitch > 0) decelerates,
+      // diving (pitch < 0) accelerates with no upper bound. A gentle thrust
+      // recovers cruise speed when below it, so level flight settles at
+      // FLIGHT_SPEED instead of staying stuck at the climb floor.
+      const alongGravity = -FLIGHT_GRAVITY * Math.sin(pitch)
+      // Recovery only kicks in once level or descending — never during a climb,
+      // so climbing always bleeds airspeed all the way down to the floor.
+      const recover =
+        pitch <= 0 && flightSpeedRef.current < FLIGHT_SPEED
+          ? (FLIGHT_SPEED - flightSpeedRef.current) * CRUISE_RECOVERY
+          : 0
+      flightSpeedRef.current += (alongGravity + recover) * dt
+      flightSpeedRef.current = Math.min(
+        MAX_SPEED,
+        Math.max(MIN_FLIGHT_SPEED, flightSpeedRef.current)
+      )
+
       const speedMul = 1 + thermal * THERMAL_SPEED_BOOST + flapBoostRef.current
+      const speed = flightSpeedRef.current * speedMul
       const lift = thermal * THERMAL_LIFT
       body.setLinvel(
         {
-          x: Math.sin(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
-          y: Math.sin(pitch) * FLIGHT_SPEED * speedMul + lift,
-          z: Math.cos(yaw) * Math.cos(pitch) * FLIGHT_SPEED * speedMul,
+          x: Math.sin(yaw) * Math.cos(pitch) * speed,
+          y: Math.sin(pitch) * speed + lift,
+          z: Math.cos(yaw) * Math.cos(pitch) * speed,
         },
         true
       )
@@ -528,6 +566,17 @@ export const Player = () => {
     const wadingTarget = inWater && moving ? 1 : 0
     wadingVolRef.current += (wadingTarget - wadingVolRef.current) * Math.min(1, dt * 6)
     wadingSoundRef.current?.setVolume(wadingVolRef.current * 0.7)
+
+    // Global speed cap — storms (and steep dives) can otherwise fling the bird
+    // well past 200 km/h. Clamp the final velocity magnitude after every force.
+    {
+      const lv = body.linvel()
+      const sp = Math.hypot(lv.x, lv.y, lv.z)
+      if (sp > MAX_SPEED) {
+        const s = MAX_SPEED / sp
+        body.setLinvel({ x: lv.x * s, y: lv.y * s, z: lv.z * s }, true)
+      }
+    }
 
     const v = body.linvel()
     gameStore.speed = Math.hypot(v.x, v.y, v.z)

@@ -43,6 +43,9 @@ export class PhysicsWorld {
     const desc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, y, z)
       .lockRotations()
+      // Continuous collision detection: free-fall dives can reach high speeds,
+      // and without CCD the body could tunnel through the terrain between steps.
+      .setCcdEnabled(true)
     this.playerBody = this.world.createRigidBody(desc)
     this.world.createCollider(
       RAPIER.ColliderDesc.capsule(CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS),

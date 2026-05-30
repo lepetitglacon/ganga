@@ -47,7 +47,7 @@ export const HUD = () => {
         }}
       >
         <div style={{ opacity: 0.7, fontSize: 11, letterSpacing: 1 }}>SPEED</div>
-        <div style={{ fontSize: 22, fontWeight: 600 }}>{speed.toFixed(1)} m/s</div>
+        <div style={{ fontSize: 22, fontWeight: 600 }}>{(speed * 3.6).toFixed(0)} km/h</div>
 
         <div style={{ opacity: 0.7, fontSize: 11, letterSpacing: 1, marginTop: 10 }}>
           WATER
