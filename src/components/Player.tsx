@@ -541,8 +541,14 @@ export const Player = () => {
       ? Math.min(1, gameStore.water + WATER_RECHARGE_RATE * dt)
       : Math.max(0, gameStore.water - WATER_DRAIN_RATE * dt)
 
-    // One big splash on the entry into the water.
-    if (inWater && !gameStore.inWater) audio.playOneShot(SPLASH_SOUND_URL)
+    // One big splash on the entry into the water — and kill the dive momentum
+    // in one shot so a high-speed plunge stops on impact instead of skating
+    // across the surface. After this the normal grounded/wading control takes
+    // over again, so walking through the water still works.
+    if (inWater && !gameStore.inWater) {
+      audio.playOneShot(SPLASH_SOUND_URL)
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    }
 
     const lvW = body.linvel()
     const hSpeed = Math.hypot(lvW.x, lvW.z)
