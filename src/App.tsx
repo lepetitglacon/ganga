@@ -9,8 +9,7 @@ import { Player } from './components/Player.tsx'
 import { WaterDrops } from './components/WaterDrops.tsx'
 import { CameraController } from './components/CameraController.tsx'
 import { PostProcess } from './components/PostProcess.tsx'
-import { Storm } from './components/Storm.tsx'
-import { Vector3 } from '@babylonjs/core'
+import { Storms } from './components/Storms.tsx'
 import { PhysicsDebug } from './components/PhysicsDebug.tsx'
 import { ThermalDebug } from './components/ThermalDebug.tsx'
 import { StormDebug } from './components/StormDebug.tsx'
@@ -33,12 +32,7 @@ export default function App() {
           <Player />
           <WaterDrops />
           <PlaceAmbience />
-          <Storm />
-          <Storm
-            configOverrides={{ center: new Vector3(-400, 0, -200) }}
-            velocity={{ x: 12, z: 8 }}
-            bounds={{ minX: -700, maxX: 700, minZ: -700, maxZ: 700 }}
-          />
+          <Storms maxConcurrent={3} />
           <PhysicsDebug />
           <ThermalDebug />
           <StormDebug />

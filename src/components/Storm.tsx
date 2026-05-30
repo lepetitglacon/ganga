@@ -91,6 +91,15 @@ uniform float noiseScrollSpeed;
 uniform float streakMix;
 uniform float stormBaseY;
 uniform float stormHeight;
+// Life envelope (spawn build-up / death dissolution).
+// lifeFade  : global alpha multiplier (0 at birth/death, 1 when grown).
+// lifeHigh  : during build-up, the normalized height the column has reached
+//             (grows 0→1.3). >1 = fully grown.
+// lifeLow   : during dissolution, the normalized height erased from the ground
+//             up (grows -0.1→1.2). <0 = nothing erased.
+uniform float lifeFade;
+uniform float lifeHigh;
+uniform float lifeLow;
 // Scene integration
 uniform vec3 cameraPosition;
 uniform vec3 sunDirection;
@@ -146,7 +155,13 @@ void main(void) {
   float bottomFade = smoothstep(0.0, bottomFadeEnd, y01);
   float topFade = 1.0 - smoothstep(topFadeStart, 1.0, y01);
 
-  float alpha = n * edge * bottomFade * topFade * patchOpacity;
+  // Life envelope: build-up grows the column up from the ground (buildMask),
+  // dissolution erases it back up from the ground (dissolveMask), and lifeFade
+  // fades the whole thing. As lifeFade drops, more patches fall under the
+  // discard threshold and thin out — reads as sand gathering / dispersing.
+  float buildMask = 1.0 - smoothstep(lifeHigh - 0.12, lifeHigh + 0.04, y01);
+  float dissolveMask = smoothstep(lifeLow - 0.04, lifeLow + 0.12, y01);
+  float alpha = n * edge * bottomFade * topFade * patchOpacity * lifeFade * buildMask * dissolveMask;
   // Discard aggressively so the depth buffer only records solid parts of a
   // patch. Without this, faint feathered edges write depth and create hard
   // halos around every quad.
@@ -185,9 +200,24 @@ export interface StormProps {
   // off the given XZ bounds. The cone base re-samples the terrain each frame.
   velocity?: { x: number; z: number }
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number }
+  // Total lifetime in ms. When set, the storm fades/grows in at spawn (build-up)
+  // and dissolves out before this time elapses. The parent is expected to
+  // unmount the storm around lifetimeMs, by which point it's already invisible.
+  lifetimeMs?: number
+  // Build-up (spawn) and dissolution (death) durations in ms. Clamped so they
+  // never overlap inside lifetimeMs. Default to a quarter/third of the life.
+  buildupMs?: number
+  dissolveMs?: number
 }
 
-export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) => {
+export const Storm = ({
+  configOverrides,
+  velocity,
+  bounds,
+  lifetimeMs,
+  buildupMs,
+  dissolveMs,
+}: StormProps = {}) => {
   const scene = useScene()
 
   useEffect(() => {
@@ -285,6 +315,9 @@ export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) =>
             'stormHeight',
             'windAngularSpeed',
             'windAngularTopFactor',
+            'lifeFade',
+            'lifeHigh',
+            'lifeLow',
             'cameraPosition',
             'sunDirection',
             'fogColor',
@@ -316,6 +349,11 @@ export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) =>
       mat.setFloat('stormHeight', storm.height)
       mat.setFloat('windAngularSpeed', storm.windAngularSpeed)
       mat.setFloat('windAngularTopFactor', storm.windAngularTopFactor)
+      // Default = fully grown, no fade. Overwritten per-frame when lifetimeMs
+      // is given so the storm builds up at spawn and dissolves before death.
+      mat.setFloat('lifeFade', 1)
+      mat.setFloat('lifeHigh', 2)
+      mat.setFloat('lifeLow', -1)
       mat.setVector3('sunDirection', SUN_DIR)
       mat.setFloat('shadeStrength', 0.55)
       plane.material = mat
@@ -363,6 +401,47 @@ export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) =>
         tPrev = now
         mat.setFloat('time', t)
         matBack.setFloat('time', t)
+        // Life envelope: build-up at spawn, dissolution before death.
+        if (lifetimeMs != null) {
+          const lifeSec = lifetimeMs / 1000
+          let buildup = (buildupMs ?? lifetimeMs * 0.25) / 1000
+          let dissolve = (dissolveMs ?? lifetimeMs * 0.3) / 1000
+          // Never let the two phases overlap: scale them down to fit the life.
+          if (buildup + dissolve > lifeSec) {
+            const k = lifeSec / (buildup + dissolve)
+            buildup *= k
+            dissolve *= k
+          }
+          let fade = 1
+          let high = 2
+          let low = -1
+          // Forces ramp up with the build-up, but cut to 0 the instant the
+          // tornado starts dissolving — no invisible push during the fade-out.
+          let force = 1
+          if (t < buildup) {
+            // smoothstep 0→1; column grows up from the ground as it fades in.
+            const p = t / buildup
+            const e = p * p * (3 - 2 * p)
+            fade = e
+            high = -0.1 + e * 1.4
+            force = e
+          } else if (t > lifeSec - dissolve) {
+            // Funnel lifts off the ground (erase floor climbs) while fading out.
+            const q = Math.min(1, (t - (lifeSec - dissolve)) / dissolve)
+            const e = q * q * (3 - 2 * q)
+            fade = 1 - e
+            low = -0.1 + e * 1.3
+            force = 0
+          }
+          mat.setFloat('lifeFade', fade)
+          mat.setFloat('lifeHigh', high)
+          mat.setFloat('lifeLow', low)
+          matBack.setFloat('lifeFade', fade)
+          matBack.setFloat('lifeHigh', high)
+          matBack.setFloat('lifeLow', low)
+          // See applyStormForce — physics vanishes when dissolution begins.
+          storm.forceScale = force
+        }
         // Swirl is applied per-patch in the vertex shader (height-dependent
         // angular speed), so the root node only carries position now.
         // Drift across the map. Bounce on the XZ bounds so the storm stays

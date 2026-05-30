@@ -87,6 +87,12 @@ export interface StormConfig {
   // bas tournent à la même vitesse), 0.3 = le sommet tourne ~3× plus lentement
   // que la base, ce qui enroule la poussière en spirale comme une tornade.
   windAngularTopFactor: number
+
+  // --- Runtime (non config) ---
+  // Multiplicateur 0..1 des forces, piloté par l'enveloppe de vie (build-up /
+  // dissolution). Mis à jour chaque frame par le composant Storm pour que la
+  // poussée suive l'apparition/disparition visuelle. Absent = 1 (plein).
+  forceScale?: number
 }
 
 export function shellRadiusAt(storm: StormConfig, relY: number): number {
@@ -163,8 +169,11 @@ export function applyStormForce(
   // herds you into its rotation instead of catapulting you indefinitely.
   const velTan = outVel.x * tx + outVel.z * tz
   const tangentMult = velTan < 0 ? 3.0 : 10
-  const wind = storm.windSpeed * s * dt * tangentMult
-  const push = storm.outwardAccel * s * dt
+  // Scale by the life envelope so a storm that's still building up or already
+  // dissolving doesn't shove the player around while it's near-invisible.
+  const lifeScale = storm.forceScale ?? 1
+  const wind = storm.windSpeed * s * dt * tangentMult * lifeScale
+  const push = storm.outwardAccel * s * dt * lifeScale
   outVel.x += tx * wind + rx * push
   outVel.z += tz * wind + rz * push
 }
@@ -202,4 +211,75 @@ export function makeDefaultStorm(groundY: number): StormConfig {
     windAngularSpeed: 1,
     windAngularTopFactor: 0.0,
   }
+}
+
+const rand = (min: number, max: number) => min + Math.random() * (max - min)
+
+// A randomly-generated storm ready to hand to the <Storm> component: a partial
+// config (random shape / colors / forces), a drift velocity, the XZ box it
+// bounces inside, and how long it should live before being despawned.
+export interface StormSpawn {
+  config: Partial<StormConfig>
+  velocity: { x: number; z: number }
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number }
+  lifetimeMs: number
+  // Random build-up (spawn) and dissolution (death) durations, each 5s..10s.
+  buildupMs: number
+  dissolveMs: number
+}
+
+// Build one random storm whose drift box is a random sub-rectangle of the
+// world bbox [-worldHalf, worldHalf]². The storm spawns somewhere inside that
+// box, drifts in a random direction, and lives 10s..60s.
+export function makeRandomStormSpawn(worldHalf: number): StormSpawn {
+  // Random sub-box of the world, kept fully inside the world bbox.
+  const boxW = rand(200, 600)
+  const boxD = rand(200, 600)
+  const cx = rand(-worldHalf + boxW / 2, worldHalf - boxW / 2)
+  const cz = rand(-worldHalf + boxD / 2, worldHalf - boxD / 2)
+  const bounds = {
+    minX: cx - boxW / 2,
+    maxX: cx + boxW / 2,
+    minZ: cz - boxD / 2,
+    maxZ: cz + boxD / 2,
+  }
+
+  // Spawn position inside that box.
+  const center = new Vector3(rand(bounds.minX, bounds.maxX), 0, rand(bounds.minZ, bounds.maxZ))
+
+  // Drift in a random heading at a random speed.
+  const heading = rand(0, Math.PI * 2)
+  const speed = rand(6, 22)
+  const velocity = { x: Math.cos(heading) * speed, z: Math.sin(heading) * speed }
+
+  // Random cone shape.
+  const baseRadius = rand(36, 80)
+  const topRadius = baseRadius + rand(40, 110)
+  const height = rand(180, 380)
+
+  // Slight warmth jitter on the sand so storms don't look cloned.
+  const warm = rand(0.92, 1.06)
+  const sandColor = new Color3(0.86 * warm, 0.7 * warm, 0.46 * Math.min(1, warm))
+
+  const config: Partial<StormConfig> = {
+    center,
+    baseRadius,
+    topRadius,
+    height,
+    wallThickness: rand(35, 60),
+    windSpeed: rand(110, 190),
+    outwardAccel: rand(110, 190),
+    patchCount: Math.round(rand(2500, 4200)),
+    sandColor,
+    noiseScrollSpeed: rand(1.6, 3.0),
+    windAngularSpeed: rand(0.6, 1.6),
+    windAngularTopFactor: rand(0.0, 0.4),
+  }
+
+  const buildupMs = rand(5_000, 10_000)
+  const dissolveMs = rand(5_000, 10_000)
+  // Keep at least 2s of fully-grown storm between build-up and dissolution.
+  const lifetimeMs = buildupMs + dissolveMs + rand(2_000, 50_000)
+
+  return { config, velocity, bounds, lifetimeMs, buildupMs, dissolveMs }
 }
