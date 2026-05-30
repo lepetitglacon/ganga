@@ -16,6 +16,7 @@ import { StormDebug } from './components/StormDebug.tsx'
 import { HUD } from './components/HUD.tsx'
 import { DebugPanel } from './components/DebugPanel.tsx'
 import { PlaceAmbience } from './components/PlaceAmbience.tsx'
+import { LensFlareComponent } from './components/LensFlare.tsx'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
         <Scene clearColor={new Color4(0.96, 0.78, 0.58, 1)}>
           <LightSetup />
           <Environment />
+          <LensFlareComponent />
           <Map />
           <Water />
           <WetnessMask />
