@@ -78,10 +78,15 @@ export interface StormConfig {
   streakMix: number
 
   // --- Visuel : rotation du cône ---
-  // Vitesse de rotation angulaire du cône en rad/s. Donne le swirl visuel.
-  // 0 = poussière statique, ~0.5–1.0 = vent qui tourne nettement,
+  // Vitesse de rotation angulaire du cône au sol, en rad/s. Donne le swirl
+  // visuel. 0 = poussière statique, ~0.5–1.0 = vent qui tourne nettement,
   // >1.5 = vortex agressif.
   windAngularSpeed: number
+  // Fraction de windAngularSpeed appliquée tout en haut du cône (0..1). Le
+  // swirl ralentit linéairement avec la hauteur : 1 = rotation rigide (haut et
+  // bas tournent à la même vitesse), 0.3 = le sommet tourne ~3× plus lentement
+  // que la base, ce qui enroule la poussière en spirale comme une tornade.
+  windAngularTopFactor: number
 }
 
 export function shellRadiusAt(storm: StormConfig, relY: number): number {
@@ -194,6 +199,7 @@ export function makeDefaultStorm(groundY: number): StormConfig {
     noiseScrollSpeed: 2.2,
     streakMix: .5,
 
-    windAngularSpeed: 0.5,
+    windAngularSpeed: 1,
+    windAngularTopFactor: 0.0,
   }
 }

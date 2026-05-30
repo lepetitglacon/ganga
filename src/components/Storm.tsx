@@ -29,8 +29,11 @@ attribute vec4 world1;
 attribute vec4 world2;
 attribute vec4 world3;
 uniform mat4 viewProjection;
-uniform mat4 world; // mesh's world matrix (root transform: position + Y swirl)
+uniform mat4 world; // mesh's world matrix (root transform: position only)
 uniform float stormHeight;
+uniform float time;
+uniform float windAngularSpeed; // rad/s swirl at the base of the cone
+uniform float windAngularTopFactor; // fraction of that speed at the top
 varying vec2 vUv;
 varying vec3 vWorldPos;
 varying float vInstanceSeed;
@@ -42,14 +45,27 @@ float ihash3(vec3 p) {
 }
 void main(void) {
   mat4 Wi = mat4(world0, world1, world2, world3);
-  // Compose mesh world * instance local → real world position.
-  vec4 wp = world * Wi * vec4(position, 1.0);
+  // Patch in cone-local space (root translation not yet applied).
+  vec3 lp = (Wi * vec4(position, 1.0)).xyz;
+  // Height-dependent swirl: the angular speed falls off linearly from
+  // windAngularSpeed at the ground to windAngularSpeed*topFactor at the top,
+  // so the cone winds the dust up into a spiral instead of rotating rigidly.
+  // Use the instance's base height (world3.y) so every vertex of a quad shares
+  // the same angle (no shear within a patch).
+  float h = clamp(world3.y / stormHeight, 0.0, 1.0);
+  float phi = time * windAngularSpeed * mix(1.0, windAngularTopFactor, h);
+  float cphi = cos(phi);
+  float sphi = sin(phi);
+  // Rotate around the cone axis (Y, at local origin).
+  lp = vec3(cphi * lp.x + sphi * lp.z, lp.y, -sphi * lp.x + cphi * lp.z);
+  vec4 wp = world * vec4(lp, 1.0);
   vWorldPos = wp.xyz;
   vUv = uv;
   vInstanceSeed = ihash3(world3.xyz);
-  // Radial direction of this patch: normalized XZ of the local translation.
-  // Cone is centered at root origin, so world3.xz points outward from the axis.
+  // Radial direction of this patch: normalized XZ of the local translation,
+  // rotated by the same swirl angle so self-shading tracks the rotation.
   vec2 rad = world3.xz;
+  rad = vec2(cphi * rad.x + sphi * rad.y, -sphi * rad.x + cphi * rad.y);
   float rlen = max(length(rad), 0.0001);
   vRadial = vec3(rad.x / rlen, 0.0, rad.y / rlen);
   gl_Position = viewProjection * wp;
@@ -267,6 +283,8 @@ export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) =>
             'streakMix',
             'stormBaseY',
             'stormHeight',
+            'windAngularSpeed',
+            'windAngularTopFactor',
             'cameraPosition',
             'sunDirection',
             'fogColor',
@@ -296,6 +314,8 @@ export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) =>
       mat.setFloat('streakMix', storm.streakMix)
       mat.setFloat('stormBaseY', storm.center.y)
       mat.setFloat('stormHeight', storm.height)
+      mat.setFloat('windAngularSpeed', storm.windAngularSpeed)
+      mat.setFloat('windAngularTopFactor', storm.windAngularTopFactor)
       mat.setVector3('sunDirection', SUN_DIR)
       mat.setFloat('shadeStrength', 0.55)
       plane.material = mat
@@ -343,8 +363,8 @@ export const Storm = ({ configOverrides, velocity, bounds }: StormProps = {}) =>
         tPrev = now
         mat.setFloat('time', t)
         matBack.setFloat('time', t)
-        // Swirl: rotate the whole cone around Y. Cheap visual that sells motion.
-        root.rotation.y = t * storm.windAngularSpeed
+        // Swirl is applied per-patch in the vertex shader (height-dependent
+        // angular speed), so the root node only carries position now.
         // Drift across the map. Bounce on the XZ bounds so the storm stays
         // reachable. Re-sample terrain so the cone base hugs the dunes.
         if (vel) {
