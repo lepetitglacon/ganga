@@ -119,7 +119,7 @@ export const CameraController = () => {
       if (document.pointerLockElement !== canvas) return
       if (gameStore.camMode !== 'third') return
       // A cinematic owns the camera — don't let the mouse steer the bird.
-      if (gameStore.cutscene || gameStore.villageCelebration) return
+      if (gameStore.cutscene || gameStore.villageCelebration || gameStore.sourceCutscene) return
       // Mouse drives the camera directly
       gameStore.camAlpha -= e.movementX * MOUSE_SENSITIVITY
       gameStore.camBeta = Scalar.Clamp(

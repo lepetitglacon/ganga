@@ -1,4 +1,4 @@
-import type { ArcRotateCamera, ShadowGenerator, TrailMesh, TransformNode, Vector3 } from '@babylonjs/core'
+import type { AbstractMesh, ArcRotateCamera, ShadowGenerator, TrailMesh, TransformNode, Vector3 } from '@babylonjs/core'
 import type { PhysicsWorld } from './physics.ts'
 import type { StormConfig } from './storm.ts'
 
@@ -75,4 +75,16 @@ export const gameStore = {
   // True while the village celebration camera tour is playing (input frozen,
   // camera taken over) — same gating as `cutscene`.
   villageCelebration: false,
+  // --- Source: rising-water cutscene ---
+  // XZ proximity trigger around the source place footprint; set by Map once the
+  // GLB loads. Walking inside it (once) kicks off the source cutscene.
+  sourceZone: null as { center: Vector3; radius: number } | null,
+  // The source's water surface (Plan.001) and the absolute Y it rises to (the
+  // "waterY" empty's world height). Set by Map; consumed by SourceCutscene.
+  sourceWater: null as { plane: AbstractMesh; startY: number; targetY: number } | null,
+  // True while the source cutscene plays (camera taken over, input frozen) —
+  // same gating as `cutscene` / `villageCelebration`.
+  sourceCutscene: false,
+  // Latch so the source cutscene plays only once per load.
+  sourceCutsceneDone: false,
 }

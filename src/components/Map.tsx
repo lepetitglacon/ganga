@@ -16,6 +16,7 @@ import { gameStore } from '@/game/gameStore.ts'
 import { initRapier, PhysicsWorld } from '@/game/physics.ts'
 import { createOasisWaterMaterial } from '@/game/oasisWaterMaterial.ts'
 import { registerReservoirs, clearReservoirs } from '@/game/reservoir.ts'
+import { registerWaterFiller, clearWaterFillers } from '@/game/waterFiller.ts'
 
 type PlaceLoad = {
   place: Place
@@ -112,6 +113,15 @@ export const Map = () => {
         }
       }
 
+      // Water-filler surfaces declared on a place (e.g. the source's Plan.001):
+      // register their footprint so the bird refills + triggers wading audio
+      // when standing in them, exactly like an oasis.
+      for (const { place, root } of loaded) {
+        for (const surface of findSurfaces(root, place.waterFiller)) {
+          registerWaterFiller(surface)
+        }
+      }
+
       // Ground surfaces declared on a place (e.g. the source's Plan): get the
       // full terrain treatment (sand material + shadows + fog) via the shared
       // sand material.
@@ -157,6 +167,50 @@ export const Map = () => {
         const radius = Vector3.Distance(min, max) * 0.5 + NPC_TRIGGER_PAD
         gameStore.npcZone = { center, radius }
         break
+      }
+
+      // Source rising-water cutscene: locate the water surface (Plan.001) and
+      // the "waterY" empty marking the height the water climbs to, plus the
+      // footprint that triggers the cutscene when the player walks into it.
+      for (const { place, root } of loaded) {
+        if (place.name !== 'source') continue
+        const descendants = root.getDescendants(false)
+        const planeName = Array.isArray(place.waterSurface)
+          ? place.waterSurface[0]
+          : place.waterSurface
+        const plane = descendants.find((d) => d.name === planeName) as
+          | AbstractMesh
+          | undefined
+        const waterY = descendants.find((d) => /^watery$/i.test(d.name)) as
+          | TransformNode
+          | undefined
+        if (plane) {
+          plane.computeWorldMatrix(true)
+          const startY = plane.getAbsolutePosition().y
+          let targetY = startY
+          if (waterY) {
+            waterY.computeWorldMatrix(true)
+            targetY = waterY.getAbsolutePosition().y
+          } else {
+            console.warn(
+              '[source] no "waterY" empty found — water will not rise. Nodes:',
+              descendants.map((d) => d.name),
+            )
+          }
+          gameStore.sourceWater = { plane, startY, targetY }
+        }
+        const bbox = place.bbox
+        if (bbox) {
+          const cx = (bbox.minX + bbox.maxX) / 2
+          const cz = (bbox.minZ + bbox.maxZ) / 2
+          const extent = Math.max(bbox.maxX - bbox.minX, bbox.maxZ - bbox.minZ) / 2
+          const cy =
+            gameStore.sourceWater?.targetY ?? place.groundY + (place.yOffset ?? 0)
+          gameStore.sourceZone = {
+            center: new Vector3(cx, cy, cz),
+            radius: extent,
+          }
+        }
       }
 
       setPlacesReady(true)
@@ -211,6 +265,7 @@ export const Map = () => {
     return () => {
       cancelled = true
       clearReservoirs()
+      clearWaterFillers()
       waterMat?.dispose()
       sandMat?.dispose()
       roots.forEach((r) => r.dispose(false, true))
@@ -218,6 +273,10 @@ export const Map = () => {
       gameStore.physics = null
       gameStore.npcZone = null
       gameStore.nearNpc = false
+      gameStore.sourceZone = null
+      gameStore.sourceWater = null
+      gameStore.sourceCutscene = false
+      gameStore.sourceCutsceneDone = false
     }
   }, [scene])
 

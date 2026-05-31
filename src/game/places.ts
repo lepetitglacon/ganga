@@ -30,6 +30,10 @@ export type Place = {
   // Child mesh name(s) to render with the animated oasis water shader
   // (visual-only: skipped when baking colliders).
   waterSurface?: string | string[]
+  // Child mesh name(s) the bird can drink/wade from like an oasis: standing in
+  // their footprint refills hydration and plays the splash/wading audio. Usually
+  // the same plane as waterSurface (the visual + the refill behaviour).
+  waterFiller?: string | string[]
   // Child mesh name(s) to treat as ground: terrain sand material + shadow
   // reception + fog (see applyGroundSurface). Add objects by listing their
   // mesh names here.
@@ -57,6 +61,7 @@ export const PLACES: Place[] = [
     radiusPadding: 1.6,
     flatRadiusRatio: 1.15,
     waterSurface: 'Plan.001',
+    waterFiller: 'Plan.001',
     groundSurface: 'Plan',
   },
 ]

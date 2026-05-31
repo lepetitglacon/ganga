@@ -20,6 +20,7 @@ import { useKeyboard } from '@/hooks/useKeyboard.ts'
 import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
 import { OASES } from '@/game/oasis.ts'
 import { updateReservoirs } from '@/game/reservoir.ts'
+import { isInWaterFiller } from '@/game/waterFiller.ts'
 import { SUN_DIR } from '@/game/world.ts'
 import { applyStormForce, sampleStorm } from '@/game/storm.ts'
 import { audio } from '@/game/audio.ts'
@@ -200,7 +201,7 @@ export const Player = () => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space') return
       // Frozen during a cutscene — Space advances the dialogue, not takeoff.
-      if (gameStore.cutscene || gameStore.villageCelebration) return
+      if (gameStore.cutscene || gameStore.villageCelebration || gameStore.sourceCutscene) return
       e.preventDefault()
       if (gameStore.birdMode === 'grounded') {
         // Active takeoff: scripted 2–3 flaps before free flight kicks in.
@@ -383,7 +384,7 @@ export const Player = () => {
       subSteps++
 
     if (gameStore.birdMode === 'grounded') {
-      if (gameStore.cutscene || gameStore.villageCelebration) {
+      if (gameStore.cutscene || gameStore.villageCelebration || gameStore.sourceCutscene) {
         // Frozen in place during a cinematic — kill any inherited skid.
         const lv = body.linvel()
         body.setLinvel({ x: 0, y: lv.y, z: 0 }, true)
@@ -613,6 +614,10 @@ export const Player = () => {
         }
       }
     }
+    // Declared water-filler planes (e.g. the source's Plan.001) count too —
+    // these carry their own surface height, so they're checked independently of
+    // the terrain-relative oasis test above.
+    if (!inWater && isInWaterFiller(tp)) inWater = true
     gameStore.water = inWater
       ? Math.min(1, gameStore.water + WATER_RECHARGE_RATE * dt)
       : Math.max(0, gameStore.water - WATER_DRAIN_RATE * dt)
