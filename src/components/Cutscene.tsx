@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useScene, useBeforeRender } from 'react-babylonjs'
 import { UniversalCamera, Vector3, type Scene } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
+import { completeQuest } from '@/game/quests.ts'
 import { RESERVOIRS } from '@/game/reservoir.ts'
 import {
   VILLAGE_INTRO_CUTSCENE,
@@ -82,6 +83,8 @@ export const Cutscene = () => {
 
   const endCutscene = () => {
     gameStore.cutscene = null
+    // Talking to the villager completes the opening quest and unlocks the next.
+    completeQuest('meet-village')
     const cam = camRef.current
     if (scene && cam) {
       if (scene.activeCamera === cam) scene.activeCamera = gameStore.arcCam

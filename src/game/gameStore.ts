@@ -72,6 +72,9 @@ export const gameStore = {
   // VillageCelebration component consumes it (sets it back to false) to kick off
   // its camera tour + water geysers.
   reservoirJustFilled: false,
+  // Set by loadGame() from a save where 'fill-reservoir' is done: the reservoir
+  // registers already full and the celebration doesn't re-fire on this load.
+  reservoirsStartFilled: false,
   // True while the village celebration camera tour is playing (input frozen,
   // camera taken over) — same gating as `cutscene`.
   villageCelebration: false,

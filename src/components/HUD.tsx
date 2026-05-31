@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { gameStore } from '@/game/gameStore.ts'
 import { VILLAGE_INTRO_CUTSCENE } from '@/game/cutscene.ts'
+import { SandBorder } from './SandBorder.tsx'
 
 export const HUD = () => {
   const [speed, setSpeed] = useState(0)
@@ -56,11 +57,15 @@ export const HUD = () => {
             background: 'rgba(0,0,0,0.62)',
             boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
             textAlign: 'center',
+            overflow: 'visible',
           }}
         >
-          <div style={{ fontSize: 21, lineHeight: 1.5, fontWeight: 500 }}>{line}</div>
-          <div style={{ marginTop: 14, fontSize: 12, letterSpacing: 1, opacity: 0.55 }}>
-            F · ESPACE · CLIC POUR CONTINUER
+          <SandBorder />
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: 21, lineHeight: 1.5, fontWeight: 500 }}>{line}</div>
+            <div style={{ marginTop: 14, fontSize: 12, letterSpacing: 1, opacity: 0.55 }}>
+              F · ESPACE · CLIC POUR CONTINUER
+            </div>
           </div>
         </div>
       </div>

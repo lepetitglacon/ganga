@@ -15,6 +15,7 @@ import {
   type ShaderMaterial,
 } from '@babylonjs/core'
 import { gameStore } from './gameStore.ts'
+import { completeQuest } from './quests.ts'
 
 export type Reservoir = {
   name: string
@@ -76,6 +77,13 @@ export function registerReservoirs(root: Node, waterMat: ShaderMaterial): void {
     waterMesh.isPickable = false
     waterMesh.applyFog = false
 
+    // Restored from a save where the reservoir quest is already done: register
+    // it full and pre-positioned so it doesn't need filling (and won't re-fire
+    // the celebration, since reservoirJustFilled stays false).
+    const startFull = gameStore.reservoirsStartFilled
+    const fill = startFull ? 1 : 0
+    if (startFull) waterMesh.position.y = max.y
+
     RESERVOIRS.push({
       name: empty.name,
       waterMesh,
@@ -83,8 +91,8 @@ export function registerReservoirs(root: Node, waterMat: ShaderMaterial): void {
       max: max.clone(),
       baseY,
       topY: max.y,
-      fill: 0,
-      completed: false,
+      fill,
+      completed: startFull,
     })
   }
 }
@@ -117,6 +125,7 @@ export function updateReservoirs(
       if (!r.completed && r.fill >= 1) {
         r.completed = true
         gameStore.reservoirJustFilled = true
+        completeQuest('fill-reservoir')
       }
     }
     r.waterMesh.position.y = r.baseY + (r.topY - r.baseY) * r.fill

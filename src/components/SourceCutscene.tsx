@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useScene, useBeforeRender } from 'react-babylonjs'
 import { UniversalCamera, Vector3, type Scene } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
+import { completeQuest } from '@/game/quests.ts'
 
 // When the player first walks into the source's footprint, the camera lifts off
 // the bird and laps once around the spring while its water surface (Plan.001)
@@ -81,6 +82,8 @@ export const SourceCutscene = () => {
     activeRef.current = false
     gameStore.sourceCutscene = false
     gameStore.sourceCutsceneDone = true
+    // Discovering the source completes its quest and unlocks 'fill-reservoir'.
+    completeQuest('find-source')
     // Snap the water to its final level so it stays full after the camera leaves.
     const water = gameStore.sourceWater
     if (water) {

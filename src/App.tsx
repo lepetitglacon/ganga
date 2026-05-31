@@ -1,5 +1,8 @@
+import { useEffect } from 'react'
 import { Engine, Scene } from 'react-babylonjs'
 import { Color4 } from '@babylonjs/core'
+import { audio } from './game/audio.ts'
+import { subscribeQuestUnlock } from './game/quests.ts'
 import { LightSetup } from './components/LightSetup.tsx'
 import { Environment } from './components/Environment.tsx'
 import { Map } from './components/Map.tsx'
@@ -17,6 +20,8 @@ import { PhysicsDebug } from './components/PhysicsDebug.tsx'
 import { ThermalDebug } from './components/ThermalDebug.tsx'
 import { StormDebug } from './components/StormDebug.tsx'
 import { HUD } from './components/HUD.tsx'
+import { QuestMenu } from './components/QuestMenu.tsx'
+import { QuestToast } from './components/QuestToast.tsx'
 import { DebugPanel } from './components/DebugPanel.tsx'
 import { PlaceAmbience } from './components/PlaceAmbience.tsx'
 import { LensFlareComponent } from './components/LensFlare.tsx'
@@ -27,7 +32,12 @@ import { SourceCutscene } from './components/SourceCutscene.tsx'
 import { Loader } from './components/Loader.tsx'
 import { MuteButton } from './components/MuteButton.tsx'
 
+const UNLOCK_SOUND_URL = '/sound/quests/unlock-quest.wav'
+
 export default function App() {
+  // Play the unlock jingle whenever a new quest becomes available.
+  useEffect(() => subscribeQuestUnlock(() => audio.playOneShot(UNLOCK_SOUND_URL)), [])
+
   return (
     <div style={{ width: '100dvw', height: '100dvh' }}>
       <Engine antialias adaptToDeviceRatio canvasId="main-canvas" engineOptions={{ audioEngine: true }}>
@@ -57,6 +67,8 @@ export default function App() {
         </Scene>
       </Engine>
       <HUD />
+      <QuestMenu />
+      <QuestToast />
       <DebugPanel />
       <Loader />
       <MuteButton />
