@@ -21,6 +21,11 @@ import {
   LEAD_HITBOX_HALF,
   samplePath,
 } from '@/game/caravan.ts'
+import { unlock } from '@/game/achievements.ts'
+
+// XZ distance (world units) within which the bird "meets" the lead camel and
+// the hidden caravan achievement reveals itself.
+const MEET_RADIUS = 35
 
 // Shade a freshly loaded/cloned camel: force its materials opaque (some GLBs
 // ship MASK + alpha 0, which discards every fragment — see Animals.tsx) and
@@ -152,6 +157,17 @@ export const Caravan = () => {
             })
             const q = carrier.rotationQuaternion!
             leadBody.setNextKinematicRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
+
+            // Reveal the hidden caravan achievement once the bird gets close to
+            // the lead camel (XZ proximity). unlock() is idempotent.
+            const player = gameStore.mesh
+            if (player) {
+              const pdx = player.position.x - pos.x
+              const pdz = player.position.z - pos.z
+              if (pdx * pdx + pdz * pdz < MEET_RADIUS * MEET_RADIUS) {
+                unlock('meet-caravan')
+              }
+            }
           }
         }
       })

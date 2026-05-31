@@ -7,14 +7,30 @@ import {
   subscribeQuests,
   type QuestStatus,
 } from '@/game/quests.ts'
+import {
+  ACHIEVEMENTS,
+  achievementProgress,
+  formatAchievement,
+  isComplete,
+  isDiscovered,
+  subscribeAchievements,
+} from '@/game/achievements.ts'
 import { clearSave, getSavedAt } from '@/game/save.ts'
 
-// Left-side quest panel toggled with Tab. The blur sits only on a left strip
-// (no full-screen dim, no colored backdrop) — the game stays visible and
-// running to the right. Quests are drawn as a node graph: depth = flex row,
-// siblings spread horizontally, so a quest can branch into several children at
-// once. Edges are measured from the real laid-out nodes (no hardcoded
-// geometry), then drawn as an SVG overlay behind the cards.
+// Left-side journal panel. Tab cycles through it: closed → first tab → next
+// tab → … → closed. Escape closes it outright. The blur sits only on a left
+// strip (no full-screen dim, no colored backdrop) — the game stays visible and
+// running to the right.
+//
+// Two tabs: "Quêtes" draws the quest tree as a node graph (depth = flex row,
+// siblings spread horizontally; edges are measured from the real laid-out nodes
+// and drawn as an SVG overlay behind the cards). "Hauts faits" lists the
+// achievements with their live values and progress bars.
+
+const TABS = [
+  { key: 'quests', label: 'Quêtes' },
+  { key: 'achievements', label: 'Hauts faits' },
+] as const
 
 const COLORS = {
   ink: '#efe7d6',
@@ -53,11 +69,42 @@ function nodeStyle(status: QuestStatus): React.CSSProperties {
   return { ...base, background: '#cdc3b0', border: `1.5px dashed rgba(43, 36, 21, 0.35)` }
 }
 
+// Achievement card: a translucent strip, gold-tinted once accomplished.
+function achievementCardStyle(done: boolean): React.CSSProperties {
+  return {
+    padding: '11px 13px',
+    borderRadius: 12,
+    boxSizing: 'border-box',
+    background: done ? 'rgba(224, 181, 99, 0.12)' : 'rgba(43, 36, 21, 0.28)',
+    border: `1px solid ${done ? COLORS.goldEdge : COLORS.faintEdge}`,
+    backdropFilter: 'blur(2px)',
+  }
+}
+
+// Round leading badge: ✓ when done, ◆ in progress, ? when still hidden.
+function achievementBadgeStyle(done: boolean): React.CSSProperties {
+  return {
+    flex: '0 0 auto',
+    width: 22,
+    height: 22,
+    borderRadius: '50%',
+    display: 'grid',
+    placeItems: 'center',
+    fontSize: 11,
+    fontWeight: 800,
+    background: done ? COLORS.gold : 'rgba(239, 231, 214, 0.12)',
+    color: done ? '#2b2415' : COLORS.inkSoft,
+  }
+}
+
 type Edge = { key: string; d: string; lit: boolean }
 
 export const QuestMenu = () => {
-  const [open, setOpen] = useState(false)
-  // Bumped on every quest change to re-render and re-measure the edges.
+  // -1 = closed; otherwise the active tab index. Tab cycles 0 → … → last →
+  // closed; Escape closes outright.
+  const [view, setView] = useState(-1)
+  const open = view >= 0
+  // Bumped on every quest/achievement change to re-render and re-measure edges.
   const [tick, setTick] = useState(0)
   const [edges, setEdges] = useState<Edge[]>([])
 
@@ -65,16 +112,19 @@ export const QuestMenu = () => {
   const nodeRefs = useRef<Map<string, HTMLElement>>(new Map())
 
   useEffect(() => subscribeQuests(() => setTick((n) => n + 1)), [])
+  useEffect(() => subscribeAchievements(() => setTick((n) => n + 1)), [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Tab') {
         // Swallow Tab always, so it never shifts browser focus off the canvas.
         e.preventDefault()
-        if (gameStore.phase === 'playing') setOpen((o) => !o)
+        if (gameStore.phase === 'playing') {
+          setView((v) => (v < 0 ? 0 : v + 1 >= TABS.length ? -1 : v + 1))
+        }
         return
       }
-      if (e.code === 'Escape') setOpen(false)
+      if (e.code === 'Escape') setView(-1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -91,7 +141,8 @@ export const QuestMenu = () => {
   // a bezier between parent-bottom and child-top, in coordinates relative to
   // the graph container (so it scrolls with the nodes).
   useLayoutEffect(() => {
-    if (!open) return
+    // Only the quests tab (index 0) has a node graph to measure.
+    if (view !== 0) return
     const measure = () => {
       const graph = graphRef.current
       if (!graph) return
@@ -127,7 +178,7 @@ export const QuestMenu = () => {
       ro.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [open, tick])
+  }, [view, tick])
 
   if (!open) return null
 
@@ -200,12 +251,42 @@ export const QuestMenu = () => {
           textShadow: '0 2px 8px rgba(0,0,0,0.5)',
         }}
       >
-        Carnet de quêtes
+        Carnet de voyage
       </div>
-      <div style={{ width: 48, height: 2, background: COLORS.gold, margin: '12px 0 16px' }} />
 
-      {/* Node graph (scrolls if it overflows). Padding gives the corner ✓ badge
-          room so it isn't clipped by the scroll box edges. */}
+      {/* Tab bar — click a tab or cycle with Tab. The active tab wears a gold
+          underline; the others are dimmed. */}
+      <div style={{ display: 'flex', gap: 18, margin: '14px 0 16px' }}>
+        {TABS.map((t, i) => {
+          const active = view === i
+          return (
+            <button
+              key={t.key}
+              onClick={() => setView(i)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: '0 0 6px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 13,
+                fontWeight: 800,
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+                color: active ? COLORS.ink : COLORS.inkFaint,
+                borderBottom: `2px solid ${active ? COLORS.gold : 'transparent'}`,
+                textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+              }}
+            >
+              {t.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* --- Tab: Quêtes — node graph (scrolls if it overflows). Padding gives
+          the corner ✓ badge room so it isn't clipped by the scroll box edges. */}
+      {view === 0 && (
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
         <div ref={graphRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 44, padding: '12px 10px' }}>
           {/* Edges, behind the nodes */}
@@ -281,6 +362,57 @@ export const QuestMenu = () => {
           ))}
         </div>
       </div>
+      )}
+
+      {/* --- Tab: Hauts faits — achievement list */}
+      {view === 1 && (
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 10, padding: '2px 2px 4px' }}>
+          {ACHIEVEMENTS.map((a) => {
+            const hidden = a.secret && !isDiscovered(a.id)
+            if (hidden) {
+              return (
+                <div key={a.id} style={achievementCardStyle(false)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={achievementBadgeStyle(false)}>?</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.inkFaint }}>
+                      Haut fait secret
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: COLORS.inkFaint, marginTop: 4 }}>
+                    À découvrir au fil du voyage.
+                  </div>
+                </div>
+              )
+            }
+            const done = isComplete(a)
+            const progress = achievementProgress(a)
+            const showBar = a.kind !== 'bool' && a.goal != null
+            return (
+              <div key={a.id} style={achievementCardStyle(done)}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <div style={achievementBadgeStyle(done)}>{done ? '✓' : '◆'}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.ink, textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
+                      {a.title}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: done ? COLORS.gold : COLORS.ink, whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
+                    {formatAchievement(a)}
+                  </div>
+                </div>
+                <div style={{ fontSize: 10.5, lineHeight: 1.35, color: COLORS.inkSoft, marginTop: 4 }}>
+                  {a.description}
+                </div>
+                {showBar && (
+                  <div style={{ height: 4, borderRadius: 2, background: 'rgba(239, 231, 214, 0.15)', marginTop: 8, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${progress * 100}%`, background: COLORS.gold, borderRadius: 2 }} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Footer, pinned to the bottom of the panel */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, paddingTop: 18 }}>

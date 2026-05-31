@@ -21,6 +21,7 @@ import { getTerrainHeight, getTerrainNormal } from '@/game/terrain.ts'
 import { OASES } from '@/game/oasis.ts'
 import { updateReservoirs } from '@/game/reservoir.ts'
 import { isInWaterFiller } from '@/game/waterFiller.ts'
+import { addProgress } from '@/game/achievements.ts'
 import { SUN_DIR } from '@/game/world.ts'
 import { applyStormForce, sampleStorm } from '@/game/storm.ts'
 import { audio } from '@/game/audio.ts'
@@ -214,6 +215,7 @@ export const Player = () => {
         flapBoostRef.current = FLAP_BOOST
         flapCooldownRef.current = FLAP_COOLDOWN
         triggerFlap()
+        addProgress('flaps', 1)
         audio.playOneShot(FLAP_SOUND_URL)
         // Shed water on the beat — but only if the bird actually carries any.
         // Drain hydration and hand the droplet burst the bird's current velocity
@@ -634,6 +636,10 @@ export const Player = () => {
     const lvW = body.linvel()
     const hSpeed = Math.hypot(lvW.x, lvW.z)
     const moving = hSpeed > WADE_MIN_SPEED
+
+    // Total ground distance covered (world units = metres → km), accumulated
+    // over the fixed step so it's framerate-independent.
+    addProgress('distance', (hSpeed * dt) / 1000)
 
     // Feet wetness: full while wading, then dries out over WET_TRAIL_LENGTH
     // meters of subsequent travel. WetnessMask reads it to paint the trail.

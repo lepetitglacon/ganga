@@ -1,34 +1,33 @@
-// localStorage save system. The quest tree (quests.ts) is the source of truth
-// for progression; this module persists the quest status map under a single
-// versioned JSON blob and, on load, derives the few world flags that need to
-// reflect past progress (skip the already-seen source cutscene, register the
-// reservoir already full).
+// localStorage save system. Only the achievements (achievements.ts) persist
+// across runs — they're a lifetime tally and are meant to carry over. The quest
+// tree is deliberately *not* saved: every run starts the story fresh (source
+// cutscene replays, reservoir starts empty), so the world flags derived from
+// quest progress all stay at their defaults.
 //
-// Autosave is event-driven, not timed: any quest change schedules a debounced
-// write, and we flush on tab hide / unload. Nothing serializes live runtime
-// objects (meshes, cameras, physics) — only logical progress.
+// Autosave is event-driven, not timed: any achievement change schedules a
+// throttled write, and we flush on tab hide / unload. Nothing serializes live
+// runtime objects (meshes, cameras, physics) — only logical progress.
 
-import { gameStore } from './gameStore.ts'
 import {
-  getQuestStatus,
-  loadQuestStatus,
-  resetQuests,
-  serializeQuests,
-  subscribeQuests,
-  type QuestStatus,
-} from './quests.ts'
+  loadAchievements,
+  resetAchievements,
+  serializeAchievements,
+  subscribeAchievements,
+  type AchievementSave,
+} from './achievements.ts'
+import { resetQuests } from './quests.ts'
 
 const KEY = 'ganga:save'
 const VERSION = 1
 
 export type SaveData = {
   v: number
-  quests: Record<string, QuestStatus>
+  achievements?: AchievementSave
   savedAt: number
 }
 
-// Gate autosave until the initial load has run, so loadQuestStatus's notify()
-// (and any boot-time quest seeding) doesn't write a save before we've read one.
+// Gate autosave until the initial load has run, so loadAchievements's notify()
+// doesn't write a save before we've read one.
 let booted = false
 let saveTimer: number | null = null
 
@@ -49,17 +48,12 @@ export function hasSave(): boolean {
 }
 
 // Read the save (if any) and apply it. Call once, before the world initializes.
+// Quests are intentionally left at their fresh module-load state — only the
+// achievements are restored.
 export function loadGame(): void {
   const data = readRaw()
-  if (data && data.v === VERSION && data.quests) {
-    loadQuestStatus(data.quests)
-    // Derive world flags from progression — quests are the single truth.
-    if (getQuestStatus('find-source') === 'done') {
-      gameStore.sourceCutsceneDone = true
-    }
-    if (getQuestStatus('fill-reservoir') === 'done') {
-      gameStore.reservoirsStartFilled = true
-    }
+  if (data && data.v === VERSION) {
+    loadAchievements(data.achievements)
   } else if (data && data.v !== VERSION) {
     // Unknown/older schema: drop it rather than risk loading garbage. Add real
     // migrations here when the schema evolves.
@@ -71,7 +65,7 @@ export function loadGame(): void {
 function buildSave(): SaveData {
   return {
     v: VERSION,
-    quests: serializeQuests(),
+    achievements: serializeAchievements(),
     savedAt: Date.now(),
   }
 }
@@ -88,9 +82,10 @@ export function getSavedAt(): number | null {
   return readRaw()?.savedAt ?? null
 }
 
-// Wipes the save and resets the live quest tree to a fresh game. Resetting the
-// in-memory tree matters even right before a reload: the beforeunload flush
-// would otherwise re-persist the still-completed quests over the cleared save.
+// Wipes the save and resets the live state to a fresh game. Resetting the
+// in-memory achievements matters even right before a reload: the beforeunload
+// flush would otherwise re-persist them over the cleared save. Quests are reset
+// too for good measure, though they aren't persisted.
 export function clearSave(): void {
   try {
     localStorage.removeItem(KEY)
@@ -98,11 +93,16 @@ export function clearSave(): void {
     /* ignore */
   }
   resetQuests()
+  resetAchievements()
 }
 
+// Throttle-trailing (not debounce): the first change schedules a write 500ms
+// out and later changes within that window are absorbed into it. This matters
+// for achievement counters, which tick every frame — a debounce that reset on
+// each change would never fire while the player keeps moving.
 function scheduleSave(): void {
   if (!booted) return
-  if (saveTimer != null) clearTimeout(saveTimer)
+  if (saveTimer != null) return
   saveTimer = window.setTimeout(() => {
     saveTimer = null
     saveGame()
@@ -111,12 +111,12 @@ function scheduleSave(): void {
 
 let installed = false
 
-// Wire autosave: persist on any quest change, and flush immediately when the
-// tab is hidden or closed so a pending debounce isn't lost.
+// Wire autosave: persist on any achievement change, and flush immediately when
+// the tab is hidden or closed so a pending write isn't lost.
 export function installSave(): void {
   if (installed) return
   installed = true
-  subscribeQuests(scheduleSave)
+  subscribeAchievements(scheduleSave)
   const flush = () => {
     if (booted) saveGame()
   }

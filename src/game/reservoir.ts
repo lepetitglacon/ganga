@@ -16,6 +16,7 @@ import {
 } from '@babylonjs/core'
 import { gameStore } from './gameStore.ts'
 import { completeQuest } from './quests.ts'
+import { addProgress } from './achievements.ts'
 
 export type Reservoir = {
   name: string
@@ -120,6 +121,7 @@ export function updateReservoirs(
       )
       gameStore.water -= amount
       r.fill = Math.min(1, r.fill + amount / RESERVOIR_CAPACITY)
+      addProgress('water-carried', amount)
       transferring = true
       // First time this reservoir tops off: fire the village celebration once.
       if (!r.completed && r.fill >= 1) {
