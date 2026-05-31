@@ -25,8 +25,8 @@ export const CLOUD_SUN_CAM_NAME = 'cloudSunCam'
 
 // Clouds float high over the dunes like real cumulus. Purely visual — no
 // collision — so they sit well above where the bird ever climbs.
-const ALT_MIN = 150
-const ALT_MAX = 360
+const ALT_MIN = 175
+const ALT_MAX = 385
 
 // --- 3D value noise (cloud shaping, CPU side) ---
 function hash3(x: number, y: number, z: number): number {
@@ -91,10 +91,10 @@ export function makeRandomClouds(count: number, worldHalf: number): CloudSpawn[]
     const terrainY = getTerrainHeight(cx, cz)
     const cy = terrainY + ALT_MIN + Math.random() * (ALT_MAX - ALT_MIN)
 
-    const radius = 230 + Math.random() * 250 // horizontal reach — enormous cumulus
+    const radius = 300 + Math.random() * 300 // horizontal reach — enormous cumulus
     const ry = radius * (0.42 + Math.random() * 0.18) // vertical half-extent (flatter)
     const target = Math.round(
-      Math.min(4500, Math.max(1600, Math.pow(radius / 80, 2) * 950)),
+      Math.min(6500, Math.max(2500, Math.pow(radius / 85, 2) * 1100)),
     )
     // Per-cloud noise offset so each cloud has its own lumps.
     const ox = Math.random() * 500
@@ -119,14 +119,14 @@ export function makeRandomClouds(count: number, worldHalf: number): CloudSpawn[]
       // Denser core, noisy rim: accept only where the noise beats a threshold
       // that climbs with distance from the centre.
       const dens = fbm3(px * 0.03 + ox, py * 0.05 + oy, pz * 0.03 + oz)
-      if (dens < 0.34 + r2 * 0.42) continue
+      if (dens < 0.3 + r2 * 0.45) continue
 
       const wx = cx + px
       const wy = cy + py
       const wz = cz + pz
       // Identity matrix, translation in the last column (column-major).
       mats.push(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, wx, wy, wz, 1)
-      const size = radius * (0.11 + Math.random() * 0.11)
+      const size = radius * (0.14 + Math.random() * 0.12)
       const normH = (py / ry + 1) * 0.5
       datas.push(size, normH, Math.random(), 0)
       n++

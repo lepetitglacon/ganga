@@ -158,7 +158,7 @@ void main(void) {
   }
   if (a < 0.04) discard;
 
-  float lightT = clamp(vNormH * 0.75 + 0.25, 0.0, 1.0);
+  float lightT = clamp(vNormH * 0.55 + 0.45, 0.0, 1.0);
   vec3 col = mix(shadowColor, litColor, lightT);
 
   float dist = length(vWorldPos - cameraPosition);
@@ -195,8 +195,10 @@ Effect.ShadersStore['cloudDensityFragmentShader'] = CLOUD_DENSITY_FS
 class CloudShadowPlugin extends MaterialPluginBase {
   texture: BaseTexture | null = null
   matrix = Matrix.Identity()
-  strength = 0.7
-  tint = new Color3(0.5, 0.5, 0.58)
+  strength = 0.85
+  // Warm ochre shadow multiplier: keep red, cut blue hard, so shadowed sand
+  // stays a warm desert tone (a neutral/cool grey turns the sand greenish).
+  tint = new Color3(0.82, 0.5, 0.28)
   private _on = false
 
   constructor(material: Material) {
@@ -255,7 +257,9 @@ class CloudShadowPlugin extends MaterialPluginBase {
           uniform sampler2D cloudShadowSampler;
         #endif
       `,
-      CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: `
+      // Apply BEFORE fog so distant shadows fade into the haze instead of
+      // sitting on top of it.
+      CUSTOM_FRAGMENT_BEFORE_FOG: `
         #ifdef CLOUDSHADOW
           vec4 csClip = cloudShadowMatrix * vec4(vPositionW, 1.0);
           vec3 csNdc = csClip.xyz / csClip.w;
@@ -337,8 +341,8 @@ export const Clouds = ({ count = 11 }: CloudsProps) => {
         m.setFloat('curlFreq', CURL_FREQ)
         m.setFloat('curlFlow', CURL_FLOW)
         m.setFloat('spriteMode', sprite ? 1 : 0)
-        m.setColor3('litColor', new Color3(1.0, 0.98, 0.95))
-        m.setColor3('shadowColor', new Color3(0.62, 0.64, 0.74))
+        m.setColor3('litColor', new Color3(1.0, 1.0, 1.0))
+        m.setColor3('shadowColor', new Color3(0.85, 0.86, 0.9))
         return m
       }
 
