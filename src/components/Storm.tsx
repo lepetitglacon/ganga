@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useScene, useBeforeRender } from 'react-babylonjs'
+import { useScene } from 'react-babylonjs'
 import {
   Effect,
   Matrix,
@@ -493,15 +493,7 @@ export const Storm = ({
     }
   }, [scene])
 
-  // Drive a localized fog boost when the player is near/in a storm wall.
-  // We touch scene.fogDensity directly — Environment owns the baseline.
-  useBeforeRender(() => {
-    if (!scene) return
-    const baseDensity = 0.0042
-    const prox = gameStore.stormProximity
-    // Smoothly add up to +0.018 to the fog density when fully inside the wall.
-    scene.fogDensity = baseDensity + prox * 0.018
-  })
-
+  // Fog is no longer driven here: Environment routes gameStore.stormProximity
+  // through the fog controller so there's a single writer of scene.fog*.
   return null
 }

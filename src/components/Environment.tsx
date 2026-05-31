@@ -1,9 +1,8 @@
 import { useEffect } from 'react'
-import { useScene } from 'react-babylonjs'
+import { useScene, useBeforeRender } from 'react-babylonjs'
 import {
   Effect,
   MeshBuilder,
-  Scene,
   ShaderMaterial,
 } from '@babylonjs/core'
 import {
@@ -13,10 +12,8 @@ import {
   SUN_TINT,
   ZENITH_COLOR,
 } from '@/game/world.ts'
-
-// Fog density tuned so the terrain edge fully dissolves into the sky at
-// the heightfield boundary (800 m). exp(-d² × 800²) ≈ 0 at d≈0.004.
-const FOG_DENSITY = 0.00005
+import { fog } from '@/game/fog.ts'
+import { gameStore } from '@/game/gameStore.ts'
 
 const SKY_VS = `
 precision highp float;
@@ -69,10 +66,10 @@ export const Environment = () => {
     if (!scene) return
 
     // Fog blends terrain into the sky at the horizon, hiding the heightmap edge.
-    // Color = HORIZON_COLOR so the sky shader's h≈0 band matches the fog exactly.
-    scene.fogMode = Scene.FOGMODE_EXP2
-    scene.fogDensity = FOG_DENSITY
-    scene.fogColor = HORIZON_COLOR
+    // All fog state lives in the fog controller (color = HORIZON_COLOR so the
+    // sky shader's h≈0 band matches it exactly). This is the single writer of
+    // scene.fog*; every custom shader just mirrors it.
+    fog.attach(scene)
 
     const sky = MeshBuilder.CreateSphere(
       'skybox',
@@ -112,9 +109,17 @@ export const Environment = () => {
     return () => {
       sky.dispose()
       mat.dispose()
-      scene.fogMode = Scene.FOGMODE_NONE
+      fog.detach()
     }
   }, [scene])
+
+  // Localized fog boost as the player nears/enters a storm wall. gameStore
+  // .stormProximity is the centralized signal (written by Player); routing it
+  // through the fog controller keeps storms as the ONLY thing modulating fog,
+  // without any Storm component touching scene.fog* itself.
+  useBeforeRender(() => {
+    fog.setStormProximity(gameStore.stormProximity)
+  })
 
   return null
 }

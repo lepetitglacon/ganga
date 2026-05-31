@@ -1,46 +1,44 @@
-import { useEffect } from 'react'
-import { useScene } from 'react-babylonjs'
-import {
-  Color3,
-  HemisphericLight,
-  DirectionalLight,
-  ShadowGenerator,
-  Vector3,
-} from '@babylonjs/core'
+import { useEffect, useRef } from 'react'
+import { useScene, useBeforeRender } from 'react-babylonjs'
+import type { DirectionalLight } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
+import {
+  aimShadowsAt,
+  createHemiLight,
+  createShadowGenerator,
+  createSun,
+} from '@/game/lighting.ts'
 
 export const LightSetup = () => {
   const scene = useScene()
+  const sunRef = useRef<DirectionalLight | null>(null)
 
   useEffect(() => {
     if (!scene) return
 
-    const hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene)
-    hemi.intensity = 0.6
-    // Warm sky bounce / cool ground bounce — Journey-ish ambient.
-    hemi.diffuse = new Color3(1.0, 0.85, 0.65)
-    hemi.groundColor = new Color3(0.45, 0.3, 0.22)
-
-    // Sun direction must match Environment.tsx SUN_DIR (negated, since the
-    // directional light points "toward" -SUN_DIR from its position).
-    const sun = new DirectionalLight('sun', new Vector3(-1, -2, -1).normalize(), scene)
-    sun.position = new Vector3(80, 160, 80)
-    sun.intensity = 1.6
-    sun.diffuse = new Color3(1.0, 0.88, 0.7)
-    sun.specular = new Color3(1.0, 0.9, 0.75)
-
-    const shadows = new ShadowGenerator(2048, sun)
-    shadows.useBlurExponentialShadowMap = true
-    shadows.blurKernel = 16
+    const hemi = createHemiLight(scene)
+    const sun = createSun(scene)
+    const shadows = createShadowGenerator(sun)
+    sunRef.current = sun
     gameStore.shadowGenerator = shadows
 
     return () => {
       shadows.dispose()
       sun.dispose()
       hemi.dispose()
+      sunRef.current = null
       gameStore.shadowGenerator = null
     }
   }, [scene])
+
+  // Keep the tight shadow frustum centered on the bird so it gets sharp shadows
+  // wherever it roams the 3000 m terrain. Until the bird loads, the frustum
+  // stays at its initial up-sun spot.
+  useBeforeRender(() => {
+    const sun = sunRef.current
+    const bird = gameStore.mesh
+    if (sun && bird) aimShadowsAt(sun, bird.getAbsolutePosition())
+  })
 
   return null
 }
