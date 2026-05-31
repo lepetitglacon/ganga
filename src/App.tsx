@@ -10,6 +10,7 @@ import { WaterDrops } from './components/WaterDrops.tsx'
 import { CameraController } from './components/CameraController.tsx'
 import { PostProcess } from './components/PostProcess.tsx'
 import { Storms } from './components/Storms.tsx'
+import { Clouds } from './components/Clouds.tsx'
 import { PhysicsDebug } from './components/PhysicsDebug.tsx'
 import { ThermalDebug } from './components/ThermalDebug.tsx'
 import { StormDebug } from './components/StormDebug.tsx'
@@ -43,6 +44,7 @@ export default function App() {
           <WaterDrops />
           <PlaceAmbience />
           <Storms maxConcurrent={3} />
+          <Clouds count={16} />
           <PhysicsDebug />
           <ThermalDebug />
           <StormDebug />

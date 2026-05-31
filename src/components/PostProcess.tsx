@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useScene } from 'react-babylonjs'
 import { SSAO2RenderingPipeline } from '@babylonjs/core'
+import { CLOUD_SUN_CAM_NAME } from '@/game/clouds.ts'
 
 const PIPELINE_NAME = 'ssao'
 
@@ -31,6 +32,9 @@ export const PostProcess = () => {
     const mgr = scene.postProcessRenderPipelineManager
 
     const attach = (cam: import('@babylonjs/core').Camera) => {
+      // The cloud shadow map's offscreen sun camera must not get SSAO — the
+      // pipeline's post-process finalize crashes during the RTT render.
+      if (cam.name === CLOUD_SUN_CAM_NAME) return
       mgr.attachCamerasToRenderPipeline(PIPELINE_NAME, cam)
     }
     scene.cameras.forEach(attach)

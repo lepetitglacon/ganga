@@ -16,7 +16,7 @@ import {
 
 // Fog density tuned so the terrain edge fully dissolves into the sky at
 // the heightfield boundary (800 m). exp(-d² × 800²) ≈ 0 at d≈0.004.
-const FOG_DENSITY = 0.0042
+const FOG_DENSITY = 0.0005
 
 const SKY_VS = `
 precision highp float;
