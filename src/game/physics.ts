@@ -39,6 +39,30 @@ export class PhysicsWorld {
     this.staticTrimeshes.push({ vertices, indices })
   }
 
+  // Moving collision box driven from a script (e.g. the lead caravan camel).
+  // Position-based kinematic bodies push the dynamic player out of the way but
+  // are never pushed back; call setNextKinematicTranslation() each frame to
+  // walk it along. Returns the body so the caller can move and later remove it.
+  addKinematicBox(
+    half: { x: number; y: number; z: number },
+    x: number,
+    y: number,
+    z: number,
+  ): RAPIER.RigidBody {
+    const body = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x, y, z),
+    )
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z),
+      body,
+    )
+    return body
+  }
+
+  removeBody(body: RAPIER.RigidBody): void {
+    this.world.removeRigidBody(body)
+  }
+
   createPlayerBody(x: number, y: number, z: number): void {
     const desc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, y, z)
