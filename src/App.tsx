@@ -3,6 +3,7 @@ import { Color4 } from '@babylonjs/core'
 import { LightSetup } from './components/LightSetup.tsx'
 import { Environment } from './components/Environment.tsx'
 import { Map } from './components/Map.tsx'
+import { Animals } from './components/Animals.tsx'
 import { Water } from './components/Water.tsx'
 import { WetnessMask } from './components/WetnessMask.tsx'
 import { Player } from './components/Player.tsx'
@@ -33,6 +34,7 @@ export default function App() {
           <Environment />
           <LensFlareComponent />
           <Map />
+          <Animals />
           <Water />
           <WetnessMask />
           <CameraController />

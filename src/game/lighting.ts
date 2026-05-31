@@ -40,11 +40,11 @@ export const SHADOWS = {
   frustumSize: 120,
   // Near/far of the shadow camera along the sun direction.
   minZ: 1,
-  maxZ: 600,
+  maxZ: 1000,
   // How far up-sun the shadow camera sits from the player. Casters between the
   // camera and (cameraBackoff + ground spread) below it get shadowed; keep
   // cameraBackoff comfortably inside [minZ, maxZ].
-  cameraBackoff: 300,
+  cameraBackoff: 600,
   // 0 = pitch-black shadow, 1 = invisible.
   darkness: 0.35,
   // PCF gives crisp, lightly anti-aliased edges (vs the old blurry exponential

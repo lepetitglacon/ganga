@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
 import { useScene } from 'react-babylonjs'
-import { Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core'
+import { Mesh, VertexData } from '@babylonjs/core'
 import {
   generateHeightData,
+  createSandMaterial,
   TERRAIN_SIZE,
   TERRAIN_SUBDIVISIONS,
 } from '@/game/terrain.ts'
@@ -85,12 +86,7 @@ export const Terrain = () => {
     vd.applyToMesh(mesh)
     mesh.useVertexColors = true
 
-    const mat = new StandardMaterial('terrainMat', scene)
-    // Warm sand — slightly desaturated so the fog/sky paints the distance.
-    mat.diffuseColor = new Color3(0.86, 0.70, 0.46)
-    mat.specularColor = new Color3(0.18, 0.14, 0.08)
-    mat.specularPower = 48
-    mesh.material = mat
+    mesh.material = createSandMaterial(scene)
     mesh.receiveShadows = true
 
     return () => {

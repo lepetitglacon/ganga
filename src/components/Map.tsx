@@ -8,15 +8,17 @@ import {
   Vector3,
 } from '@babylonjs/core'
 import { Terrain } from './Terrain.tsx'
+import { createSandMaterial, applyGroundSurface } from '@/game/terrain.ts'
 import { Rocks } from './Rocks.tsx'
 import { generateRockMesh } from '@/game/rocks.ts'
-import { PLACES, resolvePlaceRadiusFromBBox } from '@/game/places.ts'
+import { PLACES, resolvePlaceRadiusFromBBox, type Place } from '@/game/places.ts'
 import { gameStore } from '@/game/gameStore.ts'
 import { initRapier, PhysicsWorld } from '@/game/physics.ts'
 import { createOasisWaterMaterial } from '@/game/oasisWaterMaterial.ts'
 import { registerReservoirs, clearReservoirs } from '@/game/reservoir.ts'
 
 type PlaceLoad = {
+  place: Place
   meshes: AbstractMesh[]
   carrier: TransformNode
   root: TransformNode
@@ -40,6 +42,7 @@ export const Map = () => {
     const roots: TransformNode[] = []
     const loaded: PlaceLoad[] = []
     let waterMat: ReturnType<typeof createOasisWaterMaterial> | null = null
+    let sandMat: ReturnType<typeof createSandMaterial> | null = null
 
     ;(async () => {
       await initRapier()
@@ -65,7 +68,7 @@ export const Map = () => {
 
           const carrier = new TransformNode(`place-${place.name}`, scene)
           carrier.position.copyFrom(place.position)
-          carrier.position.y = place.groundY
+          carrier.position.y = place.groundY + (place.yOffset ?? 0)
           if (place.rotationY != null) carrier.rotation.y = place.rotationY
           if (place.scale != null) carrier.scaling.setAll(place.scale)
           importedRoot.parent = carrier
@@ -77,7 +80,7 @@ export const Map = () => {
           }
 
           roots.push(carrier)
-          loaded.push({ meshes: result.meshes, carrier, root: importedRoot })
+          loaded.push({ place, meshes: result.meshes, carrier, root: importedRoot })
         })
       )
 
@@ -87,6 +90,43 @@ export const Map = () => {
       // the oases) and register their trigger footprints for fill logic.
       waterMat = createOasisWaterMaterial(scene, { square: true })
       for (const { root } of loaded) registerReservoirs(root, waterMat)
+
+      // Resolve a place's declared surface mesh names to the loaded meshes.
+      const findSurfaces = (root: TransformNode, names?: string | string[]) => {
+        if (!names) return []
+        const list = Array.isArray(names) ? names : [names]
+        const descendants = root.getDescendants(false)
+        return list
+          .map((n) => descendants.find((d) => d.name === n))
+          .filter((m): m is AbstractMesh => m != null)
+      }
+
+      // Static water surfaces declared on a place (e.g. the source's Plan.001):
+      // wear the same shader as the oases. Visual-only — flagged so the collider
+      // bake below skips them.
+      for (const { place, root } of loaded) {
+        for (const surface of findSurfaces(root, place.waterSurface)) {
+          surface.material = waterMat
+          surface.isPickable = false
+          surface.applyFog = false
+        }
+      }
+
+      // Ground surfaces declared on a place (e.g. the source's Plan): get the
+      // full terrain treatment (sand material + shadows + fog) via the shared
+      // sand material.
+      sandMat = createSandMaterial(scene)
+      let sandUsed = false
+      for (const { place, root } of loaded) {
+        for (const surface of findSurfaces(root, place.groundSurface)) {
+          applyGroundSurface(surface, sandMat)
+          sandUsed = true
+        }
+      }
+      if (!sandUsed) {
+        sandMat.dispose()
+        sandMat = null
+      }
 
       // Talking bird ("Armature"): build a proximity trigger from its meshes'
       // world bounds so the cutscene can be started with F when the player
@@ -133,9 +173,10 @@ export const Map = () => {
       // Bake each place mesh into a world-space trimesh collider.
       for (const { meshes } of loaded) {
         for (const m of meshes) {
-          // The reservoir "water" surface is visual-only — skip it (it's also
-          // been detached from the hierarchy by registerReservoirs).
-          if (/^water/i.test(m.name)) continue
+          // Water surfaces are visual-only — skip them. Reservoir "water"
+          // meshes (detached by registerReservoirs) match by name; declared
+          // place surfaces (e.g. Plan.001) are flagged by wearing waterMat.
+          if (/^water/i.test(m.name) || m.material === waterMat) continue
           const positions = m.getVerticesData(VertexBuffer.PositionKind)
           const idx = m.getIndices()
           if (!positions || !idx || positions.length === 0 || idx.length === 0) continue
@@ -171,6 +212,7 @@ export const Map = () => {
       cancelled = true
       clearReservoirs()
       waterMat?.dispose()
+      sandMat?.dispose()
       roots.forEach((r) => r.dispose(false, true))
       gameStore.physics?.dispose()
       gameStore.physics = null

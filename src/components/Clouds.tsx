@@ -399,18 +399,25 @@ export const Clouds = ({ count = 11 }: CloudsProps) => {
       rtt.setMaterialForRendering(spritesMesh, densityMaterial)
       scene.customRenderTargets.push(rtt)
 
-      // --- Terrain receives the cloud shadow ---
-      const terrainMat = terrain.material as StandardMaterial | null
-      let plugin: CloudShadowPlugin | null = null
-      if (terrainMat) {
+      // --- Sand surfaces receive the cloud shadow ---
+      // The terrain and every place ground surface (applyGroundSurface) share
+      // the 'terrainMat' sand material; attach the plugin to each instance so
+      // cloud shadows fall on all of them with one consistent look.
+      const sandMats = scene.materials.filter(
+        (m): m is StandardMaterial =>
+          m instanceof StandardMaterial && m.name === 'terrainMat',
+      )
+      const plugins: CloudShadowPlugin[] = []
+      for (const mat of sandMats) {
         // Reuse an existing plugin (HMR re-runs this effect on the same
         // material; Babylon rejects adding two plugins with the same name).
-        plugin =
-          terrainMat.pluginManager?.getPlugin<CloudShadowPlugin>('CloudShadow') ??
-          new CloudShadowPlugin(terrainMat)
+        const plugin =
+          mat.pluginManager?.getPlugin<CloudShadowPlugin>('CloudShadow') ??
+          new CloudShadowPlugin(mat)
         plugin.texture = rtt
         plugin.matrix = lightMatrix
         plugin.setEnabled(true)
+        plugins.push(plugin)
       }
 
       // --- LOD bucketing ---
@@ -499,7 +506,7 @@ export const Clouds = ({ count = 11 }: CloudsProps) => {
 
       cleanup = () => {
         scene.onBeforeRenderObservable.remove(obs)
-        plugin?.setEnabled(false)
+        for (const plugin of plugins) plugin.setEnabled(false)
         const ri = scene.customRenderTargets.indexOf(rtt)
         if (ri >= 0) scene.customRenderTargets.splice(ri, 1)
         rtt.dispose()

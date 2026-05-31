@@ -1,6 +1,40 @@
-import { Vector3 } from '@babylonjs/core'
+import {
+  Vector3,
+  StandardMaterial,
+  Color3,
+  type AbstractMesh,
+  type Scene,
+} from '@babylonjs/core'
 import { applyPlaceFlattening } from './places.ts'
 import { OASES } from './oasis.ts'
+
+// Sand material shared by the terrain mesh and any place surface that should
+// blend into the ground (e.g. the source's flat base "Plan"). Warm, slightly
+// desaturated sand so the fog/sky paints the distance.
+export function createSandMaterial(scene: Scene): StandardMaterial {
+  const mat = new StandardMaterial('terrainMat', scene)
+  mat.diffuseColor = new Color3(0.86, 0.7, 0.46)
+  mat.specularColor = new Color3(0.18, 0.14, 0.08)
+  mat.specularPower = 48
+  return mat
+}
+
+// Treats a place mesh as ground: gives it the sand material and the same
+// shading the terrain gets — shadow reception and scene fog. Imported planes
+// often carry inverted winding (GLB handedness flip), so we render AND light
+// both sides; without twoSidedLighting the up-facing side gets a downward
+// normal and looks flat/unlit with no sun shading or shadows.
+//
+// `mat` is shared across all ground surfaces — setting these flags on it is
+// idempotent. To add a new ground object: name its mesh(es) and list them in
+// the place's `groundSurface`; everything below is applied automatically.
+export function applyGroundSurface(mesh: AbstractMesh, mat: StandardMaterial): void {
+  mat.backFaceCulling = false
+  mat.twoSidedLighting = true
+  mesh.material = mat
+  mesh.receiveShadows = true
+  mesh.applyFog = true
+}
 
 // How far the carved rim crest sits ABOVE the water surface. The bowl always
 // rises past the waterline just outside the water disc, so the flat surface is
