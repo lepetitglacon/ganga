@@ -40,7 +40,7 @@ export const DebugPanel = () => {
     <div
       style={{
         position: 'absolute',
-        top: 16,
+        top: 200,
         right: 16,
         padding: '10px 14px',
         background: 'rgba(0,0,0,0.45)',

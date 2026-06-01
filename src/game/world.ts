@@ -2,7 +2,12 @@ import { Color3, Vector3 } from '@babylonjs/core'
 
 // Direction *toward* the sun (unit vector). Must match the sky shader and
 // LightSetup — the directional light points -SUN_DIR from its position.
-export const SUN_DIR = new Vector3(1, 2, 1).normalize()
+//
+// The sun sits due NORTH (+Z) so it doubles as a fixed compass for the player:
+// X = 0 keeps the azimuth purely +Z, Y sets the elevation above the horizon.
+// Everything visual (sky disk, directional light, shadows, water specular)
+// derives from this single vector, so they all stay coherent if you tweak it.
+export const SUN_DIR = new Vector3(0, 2, 1).normalize()
 
 // Shared palette — the sky shader's horizonColor IS the fog color, so the
 // terrain edge dissolves seamlessly into the sky at the horizon line.

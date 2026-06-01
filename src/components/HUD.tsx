@@ -90,7 +90,7 @@ export const HUD = () => {
         style={{
           position: 'absolute',
           top: 16,
-          left: 16,
+          right: 16,
           padding: '8px 12px',
           background: 'rgba(0,0,0,0.35)',
           borderRadius: 8,

@@ -204,6 +204,10 @@ export const QuestMenu = () => {
     }
   }, [view, tick])
 
+    if (gameStore.phase === 'intro') {
+        return
+    }
+
   if (!open) {
     return (
       <div
