@@ -1,4 +1,4 @@
-import { getTerrainHeight } from './terrain.ts'
+import { getTerrainHeight } from './terrainGen.ts'
 
 // ---------------------------------------------------------------------------
 // Procedural "Colorado" rock massifs.

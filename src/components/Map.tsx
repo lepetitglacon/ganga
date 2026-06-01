@@ -10,7 +10,7 @@ import {
 import { Terrain } from './Terrain.tsx'
 import { createSandMaterial, applyGroundSurface } from '@/game/terrain.ts'
 import { Rocks } from './Rocks.tsx'
-import { generateRockMesh } from '@/game/rocks.ts'
+import { prepareMapGen, loadRocks, disposeMapGen } from '@/workers/mapgen.ts'
 import { PLACES, resolvePlaceRadiusFromBBox, type Place } from '@/game/places.ts'
 import { gameStore } from '@/game/gameStore.ts'
 import { initRapier, PhysicsWorld } from '@/game/physics.ts'
@@ -86,6 +86,23 @@ export const Map = () => {
       )
 
       if (cancelled) return
+
+      // Place radii are now resolved from the GLB bounds: hand the flattening
+      // footprints to the map generator. This mirrors them onto the main-thread
+      // terrain module (so runtime getTerrainHeight matches) AND forwards them as
+      // the worker payload. Must run before <Terrain>/<Rocks> mount below.
+      prepareMapGen(
+        PLACES.filter(
+          (p): p is Place & { radius: number; flatRadius: number } =>
+            p.radius != null && p.flatRadius != null,
+        ).map((p) => ({
+          x: p.position.x,
+          z: p.position.z,
+          radius: p.radius,
+          flatRadius: p.flatRadius,
+          groundY: p.groundY,
+        })),
+      )
 
       // Reservoirs: detach + shade the "water" level meshes (same material as
       // the oases) and register their trigger footprints for fill logic.
@@ -252,9 +269,11 @@ export const Map = () => {
         }
       }
 
-      // Procedural rock massif — same triangle soup as the rendered mesh
-      // (generateRockMesh is memoized), already in world space.
-      const rock = generateRockMesh()
+      // Procedural rock massif — same triangle soup as the rendered mesh, built
+      // once by the map worker (loadRocks is memoized) and shared with Rocks.tsx,
+      // already in world space.
+      const rock = await loadRocks()
+      if (cancelled) return
       if (rock.indices.length > 0) {
         physics.addStaticTrimesh(rock.positions, rock.indices)
       }
@@ -264,6 +283,7 @@ export const Map = () => {
 
     return () => {
       cancelled = true
+      disposeMapGen()
       clearReservoirs()
       clearWaterFillers()
       waterMat?.dispose()
