@@ -111,8 +111,28 @@ export const QuestMenu = () => {
   const graphRef = useRef<HTMLDivElement | null>(null)
   const nodeRefs = useRef<Map<string, HTMLElement>>(new Map())
 
+  const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const resetAutoClose = () => {
+    if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current)
+    autoCloseTimer.current = setTimeout(() => setView(-1), 5000)
+  }
+
   useEffect(() => subscribeQuests(() => setTick((n) => n + 1)), [])
   useEffect(() => subscribeAchievements(() => setTick((n) => n + 1)), [])
+
+  // Clear auto-close timer when menu closes; start it when it opens.
+  useEffect(() => {
+    if (open) {
+      resetAutoClose()
+    } else if (autoCloseTimer.current) {
+      clearTimeout(autoCloseTimer.current)
+      autoCloseTimer.current = null
+    }
+    return () => {
+      if (autoCloseTimer.current) clearTimeout(autoCloseTimer.current)
+    }
+  }, [open])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -120,7 +140,11 @@ export const QuestMenu = () => {
         // Swallow Tab always, so it never shifts browser focus off the canvas.
         e.preventDefault()
         if (gameStore.phase === 'playing') {
-          setView((v) => (v < 0 ? 0 : v + 1 >= TABS.length ? -1 : v + 1))
+          setView((v) => {
+            const next = v < 0 ? 0 : v + 1 >= TABS.length ? -1 : v + 1
+            if (next >= 0) resetAutoClose()
+            return next
+          })
         }
         return
       }
@@ -180,7 +204,49 @@ export const QuestMenu = () => {
     }
   }, [view, tick])
 
-  if (!open) return null
+  if (!open) {
+    return (
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: '33%',
+          zIndex: 50,
+          pointerEvents: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '8px 14px 8px 12px',
+          background: 'rgba(43, 36, 21, 0.45)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+          borderRadius: '0 10px 10px 0',
+          fontFamily: 'system-ui, sans-serif',
+          color: COLORS.inkSoft,
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: 0.5,
+          textShadow: '0 1px 4px rgba(0,0,0,0.5)',
+          opacity: 0.85,
+        }}
+      >
+        Quête{' '}
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            padding: '2px 6px',
+            borderRadius: 4,
+            background: 'rgba(239, 231, 214, 0.15)',
+            border: `1px solid ${COLORS.faintEdge}`,
+            color: COLORS.ink,
+          }}
+        >
+          tab
+        </span>
+      </div>
+    )
+  }
 
   const savedAt = getSavedAt()
   const savedLabel = savedAt
