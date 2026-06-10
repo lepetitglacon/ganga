@@ -8,9 +8,9 @@ import { Water } from '@/components/Water.tsx'
 import { WetnessMask } from '@/components/WetnessMask.tsx'
 import { CameraController } from '@/components/CameraController.tsx'
 import { IntroSequence } from '@/components/IntroSequence.tsx'
-import { Cutscene } from '@/components/Cutscene.tsx'
-import { VillageCelebration } from '@/components/VillageCelebration.tsx'
-import { SourceCutscene } from '@/components/SourceCutscene.tsx'
+import { VillageIntro } from '@/cutscenes/VillageIntro.tsx'
+import { Celebration } from '@/cutscenes/Celebration.tsx'
+import { SourceRising } from '@/cutscenes/SourceRising.tsx'
 import { PostProcess } from '@/components/PostProcess.tsx'
 import { Player } from '@/components/Player.tsx'
 import { WaterDrops } from '@/components/WaterDrops.tsx'
@@ -48,9 +48,9 @@ const DesertSceneContent = () => (
     <WetnessMask />
     <CameraController />
     <IntroSequence />
-    <Cutscene />
-    <VillageCelebration />
-    <SourceCutscene />
+    <VillageIntro />
+    <Celebration />
+    <SourceRising />
     <PostProcess />
     <Player />
     <WaterDrops />

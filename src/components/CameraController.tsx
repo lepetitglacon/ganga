@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useScene, useBeforeRender } from 'react-babylonjs'
 import { ArcRotateCamera, UniversalCamera, Vector3, Scalar } from '@babylonjs/core'
 import { gameStore } from '@/game/gameStore.ts'
+import { isCutsceneActive } from '@/game/director.ts'
 import { getTerrainHeight } from '@/game/terrain.ts'
 
 // Keep the camera at least this many meters above the terrain at its own
@@ -118,6 +119,7 @@ export const CameraController = () => {
     freeCam.keysUpward = []
     freeCam.keysDownward = []
     freeCam.minZ = 0.1
+    freeCam.fov = 1
 
     // Currently-held keys (by e.code). Filled by the window handlers below.
     const freeKeys = new Set<string>()
@@ -134,7 +136,7 @@ export const CameraController = () => {
       if (document.pointerLockElement !== canvas) return
       if (gameStore.camMode !== 'third') return
       // A cinematic owns the camera — don't let the mouse steer the bird.
-      if (gameStore.cutscene || gameStore.villageCelebration || gameStore.sourceCutscene) return
+      if (isCutsceneActive()) return
       // Mouse drives the camera directly
       gameStore.camAlpha -= e.movementX * MOUSE_SENSITIVITY
       gameStore.camBeta = Scalar.Clamp(

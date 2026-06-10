@@ -1,8 +1,9 @@
-// localStorage save system. Only the achievements (achievements.ts) persist
-// across runs — they're a lifetime tally and are meant to carry over. The quest
-// tree is deliberately *not* saved: every run starts the story fresh (source
-// cutscene replays, reservoir starts empty), so the world flags derived from
-// quest progress all stay at their defaults.
+// localStorage save system. The achievements (achievements.ts) persist across
+// runs — they're a lifetime tally and are meant to carry over — along with the
+// ids of repeat="once-per-save" cutscenes (director.ts). The quest tree is
+// deliberately *not* saved: every run starts the story fresh (source cutscene
+// replays, reservoir starts empty), so the world flags derived from quest
+// progress all stay at their defaults.
 //
 // Autosave is event-driven, not timed: any achievement change schedules a
 // throttled write, and we flush on tab hide / unload. Nothing serializes live
@@ -15,6 +16,12 @@ import {
   subscribeAchievements,
   type AchievementSave,
 } from './achievements.ts'
+import {
+  loadPlayedCutscenes,
+  resetPlayedCutscenes,
+  serializePlayedCutscenes,
+  subscribePlayedCutscenes,
+} from './director.ts'
 import { resetQuests } from './quests.ts'
 
 const KEY = 'ganga:save'
@@ -23,6 +30,7 @@ const VERSION = 1
 export type SaveData = {
   v: number
   achievements?: AchievementSave
+  cutscenes?: string[]
   savedAt: number
 }
 
@@ -54,6 +62,7 @@ export function loadGame(): void {
   const data = readRaw()
   if (data && data.v === VERSION) {
     loadAchievements(data.achievements)
+    loadPlayedCutscenes(data.cutscenes)
   } else if (data && data.v !== VERSION) {
     // Unknown/older schema: drop it rather than risk loading garbage. Add real
     // migrations here when the schema evolves.
@@ -66,6 +75,7 @@ function buildSave(): SaveData {
   return {
     v: VERSION,
     achievements: serializeAchievements(),
+    cutscenes: serializePlayedCutscenes(),
     savedAt: Date.now(),
   }
 }
@@ -94,6 +104,7 @@ export function clearSave(): void {
   }
   resetQuests()
   resetAchievements()
+  resetPlayedCutscenes()
 }
 
 // Throttle-trailing (not debounce): the first change schedules a write 500ms
@@ -117,6 +128,7 @@ export function installSave(): void {
   if (installed) return
   installed = true
   subscribeAchievements(scheduleSave)
+  subscribePlayedCutscenes(scheduleSave)
   const flush = () => {
     if (booted) saveGame()
   }

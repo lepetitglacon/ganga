@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { gameStore } from '@/game/gameStore.ts'
-import { VILLAGE_INTRO_CUTSCENE } from '@/game/cutscene.ts'
+import { director, type DialogueLine } from '@/game/director.ts'
 import { SandBorder } from './SandBorder.tsx'
 
 export const HUD = () => {
@@ -9,8 +9,11 @@ export const HUD = () => {
   const [flying, setFlying] = useState(false)
   const [water, setWater] = useState(1)
   const [playing, setPlaying] = useState(false)
-  const [nearNpc, setNearNpc] = useState(false)
-  const [cutsceneStep, setCutsceneStep] = useState(-1)
+  const [prompt, setPrompt] = useState<string | null>(null)
+  const [inCutscene, setInCutscene] = useState(false)
+  const [line, setLine] = useState<DialogueLine | null>(null)
+  const [letterbox, setLetterbox] = useState(false)
+  const [skippable, setSkippable] = useState(false)
 
   useEffect(() => {
     let raf = 0
@@ -20,8 +23,11 @@ export const HUD = () => {
       setFlying(gameStore.birdMode !== 'grounded')
       setWater(gameStore.water)
       setPlaying(gameStore.phase === 'playing')
-      setNearNpc(gameStore.nearNpc)
-      setCutsceneStep(gameStore.cutscene ? gameStore.cutscene.step : -1)
+      setPrompt(director.prompt)
+      setInCutscene(director.activeId != null)
+      setLine(director.line)
+      setLetterbox(director.letterbox)
+      setSkippable(director.skippable)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -31,9 +37,16 @@ export const HUD = () => {
   // Stay out of the way during the loading screen / cinematic intro.
   if (!playing) return null
 
-  // During a cutscene the dialogue box takes over the whole HUD.
-  if (cutsceneStep >= 0) {
-    const line = VILLAGE_INTRO_CUTSCENE[cutsceneStep]?.text ?? ''
+  // During a cutscene the cinematic overlay (letterbox, dialogue, skip hint)
+  // takes over the whole HUD.
+  if (inCutscene) {
+    const bar = {
+      position: 'absolute' as const,
+      left: 0,
+      right: 0,
+      height: '10vh',
+      background: '#000',
+    }
     return (
       <div
         style={{
@@ -44,30 +57,62 @@ export const HUD = () => {
           color: '#fff',
         }}
       >
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 48,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 'min(680px, 80vw)',
-            padding: '22px 28px',
-            borderRadius: 14,
-            border: '1px solid rgba(255,255,255,0.25)',
-            background: 'rgba(0,0,0,0.62)',
-            boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
-            textAlign: 'center',
-            overflow: 'visible',
-          }}
-        >
-          <SandBorder />
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{ fontSize: 21, lineHeight: 1.5, fontWeight: 500 }}>{line}</div>
-            <div style={{ marginTop: 14, fontSize: 12, letterSpacing: 1, opacity: 0.55 }}>
-              F · ESPACE · CLIC POUR CONTINUER
+        {letterbox && <div style={{ ...bar, top: 0 }} />}
+        {letterbox && <div style={{ ...bar, bottom: 0 }} />}
+        {skippable && (
+          <div
+            style={{
+              position: 'absolute',
+              top: letterbox ? 'calc(10vh + 14px)' : 16,
+              right: 18,
+              fontSize: 12,
+              letterSpacing: 1,
+              opacity: 0.55,
+              textShadow: '0 1px 3px rgba(0,0,0,0.7)',
+            }}
+          >
+            ÉCHAP POUR PASSER
+          </div>
+        )}
+        {line && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: letterbox ? 'calc(10vh + 24px)' : 48,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 'min(680px, 80vw)',
+              padding: '22px 28px',
+              borderRadius: 14,
+              border: '1px solid rgba(255,255,255,0.25)',
+              background: 'rgba(0,0,0,0.62)',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.45)',
+              textAlign: 'center',
+              overflow: 'visible',
+            }}
+          >
+            <SandBorder />
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              {line.speaker && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    letterSpacing: 2,
+                    textTransform: 'uppercase',
+                    opacity: 0.65,
+                    marginBottom: 8,
+                  }}
+                >
+                  {line.speaker}
+                </div>
+              )}
+              <div style={{ fontSize: 21, lineHeight: 1.5, fontWeight: 500 }}>{line.text}</div>
+              <div style={{ marginTop: 14, fontSize: 12, letterSpacing: 1, opacity: 0.55 }}>
+                F · ESPACE · CLIC POUR CONTINUER
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     )
   }
@@ -154,7 +199,7 @@ export const HUD = () => {
         )}
       </div>
 
-      {nearNpc && !flying && (
+      {prompt && !flying && (
         <div
           style={{
             position: 'absolute',
@@ -170,7 +215,7 @@ export const HUD = () => {
             fontWeight: 600,
           }}
         >
-          <span style={{ opacity: 0.9 }}>F</span> pour parler
+          {prompt}
         </div>
       )}
     </div>

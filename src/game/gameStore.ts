@@ -66,35 +66,22 @@ export const gameStore = {
   // Per-frame summary written by Player: max wall proximity across all storms.
   // 0 = outside any storm wall, 1 = dead center of a wall. Used for fog/HUD.
   stormProximity: 0,
-  // --- Village NPC interaction + cutscene ---
+  // --- Cutscene trigger zones (live cutscene state lives in game/director.ts) ---
   // Proximity trigger around the talking bird ("Armature") in the village.
-  // Set by Map once the GLB loads. center/radius is the XZ proximity test; the
-  // cutscene camera frames `center`.
+  // Set by Map once the GLB loads; consumed by the VillageIntro cutscene's
+  // InteractTrigger, whose camera frames `center`.
   npcZone: null as { center: Vector3; radius: number } | null,
-  // True while the grounded player stands inside npcZone — HUD shows "F pour parler".
-  nearNpc: false,
-  // Non-null while the village intro cutscene plays; `step` indexes the dialogue.
-  cutscene: null as { step: number } | null,
   // One-shot event: set true the frame a reservoir first reaches 100%. The
-  // VillageCelebration component consumes it (sets it back to false) to kick off
-  // its camera tour + water geysers.
+  // Celebration cutscene consumes it (sets it back to false) to kick off its
+  // camera tour + water geysers.
   reservoirJustFilled: false,
   // Set by loadGame() from a save where 'fill-reservoir' is done: the reservoir
   // registers already full and the celebration doesn't re-fire on this load.
   reservoirsStartFilled: false,
-  // True while the village celebration camera tour is playing (input frozen,
-  // camera taken over) — same gating as `cutscene`.
-  villageCelebration: false,
-  // --- Source: rising-water cutscene ---
   // XZ proximity trigger around the source place footprint; set by Map once the
-  // GLB loads. Walking inside it (once) kicks off the source cutscene.
+  // GLB loads. Walking inside it kicks off the SourceRising cutscene.
   sourceZone: null as { center: Vector3; radius: number } | null,
   // The source's water surface (Plan.001) and the absolute Y it rises to (the
-  // "waterY" empty's world height). Set by Map; consumed by SourceCutscene.
+  // "waterY" empty's world height). Set by Map; consumed by SourceRising.
   sourceWater: null as { plane: AbstractMesh; startY: number; targetY: number } | null,
-  // True while the source cutscene plays (camera taken over, input frozen) —
-  // same gating as `cutscene` / `villageCelebration`.
-  sourceCutscene: false,
-  // Latch so the source cutscene plays only once per load.
-  sourceCutsceneDone: false,
 }

@@ -293,11 +293,8 @@ export const Map = () => {
       gameStore.physics?.dispose()
       gameStore.physics = null
       gameStore.npcZone = null
-      gameStore.nearNpc = false
       gameStore.sourceZone = null
       gameStore.sourceWater = null
-      gameStore.sourceCutscene = false
-      gameStore.sourceCutsceneDone = false
     }
   }, [scene])
 
