@@ -105,11 +105,14 @@ export const Environment = () => {
     sky.material = mat
     // Render before everything else so opaque geometry overwrites it where needed.
     sky.renderingGroupId = 0
+    // Exposed so BiomeController can lerp the horizon band to match biome fog.
+    gameStore.skyMaterial = mat
 
     return () => {
       sky.dispose()
       mat.dispose()
       fog.detach()
+      gameStore.skyMaterial = null
     }
   }, [scene])
 

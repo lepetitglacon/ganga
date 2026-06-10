@@ -22,6 +22,8 @@ import { StormDebug } from './components/StormDebug.tsx'
 import { HUD } from './components/HUD.tsx'
 import { QuestMenu } from './components/QuestMenu.tsx'
 import { QuestToast } from './components/QuestToast.tsx'
+import { BiomeController } from './components/BiomeController.tsx'
+import { BiomeToast } from './components/BiomeToast.tsx'
 import { DebugPanel } from './components/DebugPanel.tsx'
 import { PlaceAmbience } from './components/PlaceAmbience.tsx'
 import { LensFlareComponent } from './components/LensFlare.tsx'
@@ -44,6 +46,7 @@ export default function App() {
         <Scene clearColor={new Color4(0.96, 0.78, 0.58, 1)}>
           <LightSetup />
           <Environment />
+          <BiomeController />
           <LensFlareComponent />
           <Map />
           <Animals />
@@ -69,6 +72,7 @@ export default function App() {
       <HUD />
       <QuestMenu />
       <QuestToast />
+      <BiomeToast />
       <DebugPanel />
       <Loader />
       <MuteButton />

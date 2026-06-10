@@ -21,6 +21,9 @@ export const LightSetup = () => {
     const shadows = createShadowGenerator(sun)
     sunRef.current = sun
     gameStore.shadowGenerator = shadows
+    // Exposed so BiomeController can lerp them per biome.
+    gameStore.sun = sun
+    gameStore.hemi = hemi
 
     return () => {
       shadows.dispose()
@@ -28,6 +31,8 @@ export const LightSetup = () => {
       hemi.dispose()
       sunRef.current = null
       gameStore.shadowGenerator = null
+      gameStore.sun = null
+      gameStore.hemi = null
     }
   }, [scene])
 

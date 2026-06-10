@@ -10,36 +10,54 @@
 // thread's runtime height queries exactly.
 
 import {
-  generateTerrainData,
+  generateChunkData,
+  generateHeightData,
   computeNormals,
   setFlattenPlaces,
   type FlattenPlace,
 } from '@/game/terrainGen.ts'
 import { generateRockMesh } from '@/game/rocks.ts'
 
-type JobPayload = { places: FlattenPlace[] }
+// Places are installed ONCE per worker via the `init` job, so chunk/heights jobs
+// carry no payload — avoids re-cloning the array (and re-resolving oases) on
+// every chunk request.
+type JobPayload = {
+  places?: FlattenPlace[]
+  cx?: number
+  cz?: number
+}
 
 type JobResult = { result: unknown; transfer: Transferable[] }
 
 const jobs: Record<string, (payload: JobPayload) => JobResult> = {
-  terrain({ places }) {
-    setFlattenPlaces(places)
-    const t = generateTerrainData()
+  // Install the place footprints for this worker. Run once before chunk/heights.
+  init({ places }) {
+    setFlattenPlaces(places ?? [])
+    return { result: true, transfer: [] }
+  },
+
+  // One streamed terrain chunk.
+  chunk({ cx, cz }) {
+    const c = generateChunkData(cx ?? 0, cz ?? 0)
     return {
-      result: t,
+      result: c,
       transfer: [
-        t.heights.buffer,
-        t.positions.buffer,
-        t.indices.buffer,
-        t.normals.buffer,
-        t.uvs.buffer,
-        t.colors.buffer,
+        c.positions.buffer,
+        c.indices.buffer,
+        c.normals.buffer,
+        c.uvs.buffer,
+        c.colors.buffer,
       ],
     }
   },
 
-  rocks({ places }) {
-    setFlattenPlaces(places)
+  // Full heightfield for the single Rapier collider (built off-thread once).
+  heights() {
+    const h = generateHeightData()
+    return { result: h, transfer: [h.buffer] }
+  },
+
+  rocks() {
     const r = generateRockMesh()
     // Normals are cheap relative to the meshing; compute them here so the main
     // thread only has to call applyToMesh.

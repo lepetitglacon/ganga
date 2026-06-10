@@ -15,6 +15,7 @@
 // worker-built mesh/heightfield byte-for-byte identical.
 
 import { OASES } from './oasis.ts'
+import { biomeAt } from './biomes.ts'
 
 // Extended from 1600/192 to 3000/360: the cell size (S/N = 8.33 m) is kept
 // identical, so every sample over the original central area lands on the exact
@@ -23,6 +24,18 @@ import { OASES } from './oasis.ts'
 // (rocks.ts) that surrounds the map.
 export const TERRAIN_SIZE = 3000
 export const TERRAIN_SUBDIVISIONS = 360
+
+// --- Chunked rendering ------------------------------------------------------
+// The terrain MESH is streamed as square chunks around the bird (see
+// TerrainStreamer.tsx); the PHYSICS heightfield stays a single field built from
+// TERRAIN_* above. Because heightAt(x,z) is analytic, adjacent chunks sampling
+// the same world position on their shared edge get identical heights → no seam.
+// Chunk (cx,cz) covers world [cx*CHUNK_SIZE .. (cx+1)*CHUNK_SIZE] in X (same Z).
+export const CHUNK_SIZE = 200 // world metres per chunk side
+export const CHUNK_CELLS = 25 // grid cells per side → 26×26 verts, cell = 8 m
+// Texture tiling, in metres per repeat. UVs are world-derived so the sand tiles
+// continuously across chunk boundaries.
+export const UV_TILE = 25
 
 // --- Place flattening -------------------------------------------------------
 
@@ -346,4 +359,77 @@ export function generateTerrainData(): TerrainData {
 
   const normals = computeNormals(positions, indices)
   return { heights, positions, indices, normals, uvs, colors }
+}
+
+// --- single chunk (worker-built, streamed) ----------------------------------
+
+export type ChunkData = {
+  positions: Float32Array // world-space, (CHUNK_CELLS+1)² × 3
+  indices: Uint32Array // local to this chunk, CHUNK_CELLS² × 6
+  normals: Float32Array
+  uvs: Float32Array
+  colors: Float32Array
+}
+
+// Build one terrain chunk's renderable vertex data. Positions are in world
+// space; indices are local to the chunk's own vertex array. Normals are sampled
+// ANALYTICALLY per vertex (getTerrainNormalComponents) rather than accumulated
+// from this chunk's faces — that keeps shading continuous across chunk edges
+// (face accumulation would miss the neighbour's triangles and crease the seam).
+// Vertex color = wet-sand tint × the biome ground tint at that point.
+export function generateChunkData(cx: number, cz: number): ChunkData {
+  const N = CHUNK_CELLS
+  const cell = CHUNK_SIZE / N
+  const cols = N + 1
+  const vertCount = cols * cols
+  const ox = cx * CHUNK_SIZE
+  const oz = cz * CHUNK_SIZE
+
+  const positions = new Float32Array(vertCount * 3)
+  const normals = new Float32Array(vertCount * 3)
+  const uvs = new Float32Array(vertCount * 2)
+  const colors = new Float32Array(vertCount * 4)
+  const indices = new Uint32Array(N * N * 6)
+
+  for (let i = 0; i <= N; i++) {
+    for (let j = 0; j <= N; j++) {
+      const x = ox + i * cell
+      const z = oz + j * cell
+      const y = heightAt(x, z)
+      const k = i * cols + j
+      const p = k * 3
+      positions[p] = x
+      positions[p + 1] = y
+      positions[p + 2] = z
+      const n = getTerrainNormalComponents(x, z)
+      normals[p] = n.x
+      normals[p + 1] = n.y
+      normals[p + 2] = n.z
+      const u = k * 2
+      uvs[u] = x / UV_TILE
+      uvs[u + 1] = z / UV_TILE
+      // Wet-sand darkening, then the biome's ground tint on top.
+      const w = sandWetness(x, z)
+      const tint = biomeAt(x, z).groundTint
+      const c = k * 4
+      colors[c] = (1 - w * (1 - WET_SAND_TINT.r)) * (tint ? tint[0] : 1)
+      colors[c + 1] = (1 - w * (1 - WET_SAND_TINT.g)) * (tint ? tint[1] : 1)
+      colors[c + 2] = (1 - w * (1 - WET_SAND_TINT.b)) * (tint ? tint[2] : 1)
+      colors[c + 3] = 1
+    }
+  }
+
+  let t = 0
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const a = i * cols + j
+      const b = a + 1
+      const cc = (i + 1) * cols + j
+      const d = cc + 1
+      indices[t++] = a; indices[t++] = cc; indices[t++] = b
+      indices[t++] = b; indices[t++] = cc; indices[t++] = d
+    }
+  }
+
+  return { positions, indices, normals, uvs, colors }
 }

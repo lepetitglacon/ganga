@@ -1,11 +1,18 @@
-// Main-thread client for the map generation worker. Owns the worker lifecycle,
-// memoizes each job so the result is computed once and shared across every
-// consumer (e.g. the rock geometry feeds both the rendered mesh and the physics
-// collider), and mirrors the place-flattening onto the main-thread terrain
-// module so runtime height queries match the worker-built world.
+// Main-thread client for the map generation worker(s). Runs a small POOL so
+// many terrain chunks can be generated in parallel without one heavy chunk
+// blocking the next. The place footprints are installed once per worker (the
+// `init` job), then chunk/heights/rocks jobs carry no places payload.
+//
+// Memoization: heights and rocks are computed once and shared (rocks feeds both
+// the rendered mesh and the physics collider). Chunks are NOT memoized here —
+// the streamer owns their lifecycle.
 
 import { createWorkerClient, type WorkerClient } from './rpc.ts'
-import { setFlattenPlaces, type FlattenPlace, type TerrainData } from '@/game/terrainGen.ts'
+import {
+  setFlattenPlaces,
+  type FlattenPlace,
+  type ChunkData,
+} from '@/game/terrainGen.ts'
 
 export type RockData = {
   positions: Float32Array
@@ -14,43 +21,57 @@ export type RockData = {
   normals: Float32Array
 }
 
-let client: WorkerClient | null = null
-let places: FlattenPlace[] = []
-let terrainP: Promise<TerrainData> | null = null
+const POOL_SIZE = 3
+
+let pool: WorkerClient[] | null = null
+let nextWorker = 0
+let heightsP: Promise<Float32Array> | null = null
 let rocksP: Promise<RockData> | null = null
 
-function getClient(): WorkerClient {
-  if (!client) {
-    client = createWorkerClient(
-      new Worker(new URL('./mapgen.worker.ts', import.meta.url), { type: 'module' }),
+function getPool(): WorkerClient[] {
+  if (!pool) {
+    pool = Array.from({ length: POOL_SIZE }, () =>
+      createWorkerClient(
+        new Worker(new URL('./mapgen.worker.ts', import.meta.url), {
+          type: 'module',
+        }),
+      ),
     )
   }
-  return client
+  return pool
 }
 
 // Install the resolved place footprints (from Map.tsx, once the GLBs are loaded)
-// both on the main thread — so getTerrainHeight/getTerrainNormal are correct for
-// gameplay — and as the payload forwarded to the worker jobs. Call before
-// loadTerrain()/loadRocks().
-export function prepareMapGen(p: FlattenPlace[]): void {
-  places = p
+// on the main thread — so getTerrainHeight/getTerrainNormal are correct for
+// gameplay — AND on every worker in the pool. Await this before loadChunk /
+// loadHeights / loadRocks so the workers' terrain matches the main thread.
+export async function prepareMapGen(p: FlattenPlace[]): Promise<void> {
   setFlattenPlaces(p)
+  await Promise.all(getPool().map((w) => w.run('init', { places: p })))
 }
 
-export function loadTerrain(): Promise<TerrainData> {
-  return (terrainP ??= getClient().run<TerrainData>('terrain', { places }))
+// Generate one terrain chunk. Round-robins across the pool.
+export function loadChunk(cx: number, cz: number): Promise<ChunkData> {
+  const workers = getPool()
+  const w = workers[nextWorker++ % workers.length]
+  return w.run<ChunkData>('chunk', { cx, cz })
+}
+
+// Full heightfield for the single Rapier collider. Memoized.
+export function loadHeights(): Promise<Float32Array> {
+  return (heightsP ??= getPool()[0].run<Float32Array>('heights'))
 }
 
 export function loadRocks(): Promise<RockData> {
-  return (rocksP ??= getClient().run<RockData>('rocks', { places }))
+  return (rocksP ??= getPool()[0].run<RockData>('rocks'))
 }
 
-// Tear down the worker and clear the memoized results — call when the map
-// unmounts so a fresh load (e.g. on remount) recomputes cleanly.
+// Tear down the pool and clear memoized results — call when the map unmounts so
+// a fresh load (e.g. on remount) recomputes cleanly.
 export function disposeMapGen(): void {
-  client?.dispose()
-  client = null
-  places = []
-  terrainP = null
+  pool?.forEach((w) => w.dispose())
+  pool = null
+  nextWorker = 0
+  heightsP = null
   rocksP = null
 }

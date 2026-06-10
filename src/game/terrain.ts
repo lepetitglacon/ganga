@@ -20,10 +20,15 @@ export {
   ensureOasesResolved,
   setFlattenPlaces,
   generateTerrainData,
+  generateChunkData,
   TERRAIN_SIZE,
   TERRAIN_SUBDIVISIONS,
+  CHUNK_SIZE,
+  CHUNK_CELLS,
+  UV_TILE,
   type FlattenPlace,
   type TerrainData,
+  type ChunkData,
 } from './terrainGen.ts'
 
 // Sand material shared by the terrain mesh and any place surface that should

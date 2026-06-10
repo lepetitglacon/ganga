@@ -7,10 +7,10 @@ import {
   VertexBuffer,
   Vector3,
 } from '@babylonjs/core'
-import { Terrain } from './Terrain.tsx'
+import { TerrainStreamer } from './TerrainStreamer.tsx'
 import { createSandMaterial, applyGroundSurface } from '@/game/terrain.ts'
 import { Rocks } from './Rocks.tsx'
-import { prepareMapGen, loadRocks, disposeMapGen } from '@/workers/mapgen.ts'
+import { prepareMapGen, loadRocks, loadHeights, disposeMapGen } from '@/workers/mapgen.ts'
 import { PLACES, resolvePlaceRadiusFromBBox, type Place } from '@/game/places.ts'
 import { gameStore } from '@/game/gameStore.ts'
 import { initRapier, PhysicsWorld } from '@/game/physics.ts'
@@ -89,9 +89,9 @@ export const Map = () => {
 
       // Place radii are now resolved from the GLB bounds: hand the flattening
       // footprints to the map generator. This mirrors them onto the main-thread
-      // terrain module (so runtime getTerrainHeight matches) AND forwards them as
-      // the worker payload. Must run before <Terrain>/<Rocks> mount below.
-      prepareMapGen(
+      // terrain module (so runtime getTerrainHeight matches) AND installs them on
+      // every pool worker. Must finish before any chunk/heights job below.
+      await prepareMapGen(
         PLACES.filter(
           (p): p is Place & { radius: number; flatRadius: number } =>
             p.radius != null && p.flatRadius != null,
@@ -103,6 +103,7 @@ export const Map = () => {
           groundY: p.groundY,
         })),
       )
+      if (cancelled) return
 
       // Reservoirs: detach + shade the "water" level meshes (same material as
       // the oases) and register their trigger footprints for fill logic.
@@ -232,14 +233,14 @@ export const Map = () => {
 
       setPlacesReady(true)
 
-      // Wait for Terrain to mount and populate terrainHeights before
-      // building the physics world (which needs the heightfield data).
-      while (!gameStore.terrainHeights) {
-        await new Promise((r) => setTimeout(r, 16))
-        if (cancelled) return
-      }
+      // The physics heightfield is a single field over the whole map (the mesh
+      // is streamed in chunks, but the collider is not). Build it off-thread via
+      // the worker, then feed Rapier. terrainHeights is also read by PhysicsDebug.
+      const heights = await loadHeights()
+      if (cancelled) return
+      gameStore.terrainHeights = heights
 
-      const physics = new PhysicsWorld(gameStore.terrainHeights)
+      const physics = new PhysicsWorld(heights)
 
       // Bake each place mesh into a world-space trimesh collider.
       for (const { meshes } of loaded) {
@@ -302,7 +303,7 @@ export const Map = () => {
 
   return placesReady ? (
     <>
-      <Terrain />
+      <TerrainStreamer />
       <Rocks />
     </>
   ) : null

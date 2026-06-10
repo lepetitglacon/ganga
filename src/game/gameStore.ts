@@ -1,4 +1,4 @@
-import type { AbstractMesh, ArcRotateCamera, ShadowGenerator, TrailMesh, TransformNode, Vector3 } from '@babylonjs/core'
+import type { AbstractMesh, ArcRotateCamera, DirectionalLight, HemisphericLight, ShaderMaterial, ShadowGenerator, TrailMesh, TransformNode, Vector3 } from '@babylonjs/core'
 import type { PhysicsWorld } from './physics.ts'
 import type { StormConfig } from './storm.ts'
 
@@ -14,6 +14,13 @@ export const gameStore = {
   terrainHeights: null as Float32Array | null,
   arcCam: null as ArcRotateCamera | null,
   shadowGenerator: null as ShadowGenerator | null,
+  // Scene lights + sky material, exposed so BiomeController can lerp them as the
+  // bird crosses biome boundaries. Set by LightSetup / Environment.
+  sun: null as DirectionalLight | null,
+  hemi: null as HemisphericLight | null,
+  skyMaterial: null as ShaderMaterial | null,
+  // Id of the biome the bird is currently in (drives the biome-name toast).
+  currentBiomeId: 'desert',
   trails: [] as TrailMesh[],
   camMode: 'third' as 'third' | 'first',
   birdMode: 'grounded' as 'grounded' | 'takingOff' | 'flying',

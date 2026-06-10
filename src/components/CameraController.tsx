@@ -99,14 +99,29 @@ export const CameraController = () => {
     arcCam.fov = BASE_FOV
     gameStore.arcCam = arcCam
 
+    // Detached free-fly camera (Ctrl+C), using Babylon's built-in keyboard
+    // movement. keyCodes are physical-position (US-QWERTY) based, so 87/65/83/68
+    // are the keys labelled Z/Q/S/D on AZERTY (W/A/S/D positions); both the
+    // QWERTY letters and the AZERTY-letter codes are listed to be safe. Space
+    // (32) climbs, Shift (16) descends. attachControl (on toggle) wires the mouse
+    // look. The terrain stream stays centered on the bird while you fly around.
     const freeCam = new UniversalCamera('freeCam', new Vector3(0, 5, -10), scene)
     freeCam.setTarget(Vector3.Zero())
-    freeCam.keysUp = [87]
-    freeCam.keysDown = [83]
-    freeCam.keysLeft = [65]
-    freeCam.keysRight = [68]
-    freeCam.speed = 0.3
+    // Disable Babylon's built-in keyboard movement: it matches on `keyCode`,
+    // which is layout-broken on AZERTY (Z/Q/W/A swap). We move the camera
+    // ourselves below from `e.code` — exactly the source the bird uses, so the
+    // same ZQSD keys that fly the bird also fly this cam.
+    freeCam.keysUp = []
+    freeCam.keysDown = []
+    freeCam.keysLeft = []
+    freeCam.keysRight = []
+    freeCam.keysUpward = []
+    freeCam.keysDownward = []
     freeCam.minZ = 0.1
+
+    // Currently-held keys (by e.code). Filled by the window handlers below.
+    const freeKeys = new Set<string>()
+    const FREE_SPEED = 60 // m/s
 
     scene.activeCamera = arcCam
 
@@ -139,6 +154,7 @@ export const CameraController = () => {
     document.addEventListener('mousemove', onMouseMove)
 
     const onKeyDown = (e: KeyboardEvent) => {
+      freeKeys.add(e.code)
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
         if (!gameStore.freeLook) {
           gameStore.freeLook = true
@@ -148,13 +164,12 @@ export const CameraController = () => {
       }
       if (!e.ctrlKey || e.code !== 'KeyC') return
       e.preventDefault()
+      freeKeys.clear()
       if (gameStore.camMode === 'third') {
         gameStore.camMode = 'first'
-        const mesh = gameStore.mesh
-        if (mesh) {
-          freeCam.position.copyFrom(mesh.position.add(new Vector3(0, 2, -5)))
-          freeCam.setTarget(mesh.position.clone())
-        }
+        // Start where the orbit camera was so the switch doesn't jump.
+        freeCam.position.copyFrom(arcCam.position)
+        freeCam.setTarget(arcCam.target.clone())
         freeCam.attachControl(canvas, true)
         scene.activeCamera = freeCam
       } else {
@@ -166,6 +181,7 @@ export const CameraController = () => {
     window.addEventListener('keydown', onKeyDown)
 
     const onKeyUp = (e: KeyboardEvent) => {
+      freeKeys.delete(e.code)
       if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return
       if (gameStore.freeLook) {
         gameStore.freeLook = false
@@ -174,11 +190,40 @@ export const CameraController = () => {
     }
     window.addEventListener('keyup', onKeyUp)
 
+    // Move the free-fly cam each frame from e.code keys (layout-independent),
+    // only while it's the active camera. Forward/back/left/right are KeyW/S/A/D
+    // (= the AZERTY keys labelled Z/S/Q/D, same as the bird); Space climbs,
+    // Shift descends. Driven by a direct scene observer so there's no hook/ref
+    // timing in play.
+    let freeLastT = performance.now()
+    const freeMover = scene.onBeforeRenderObservable.add(() => {
+      if (scene.activeCamera !== freeCam) {
+        freeLastT = performance.now()
+        return
+      }
+      const t = performance.now()
+      const fdt = Math.min((t - freeLastT) / 1000, 0.05)
+      freeLastT = t
+      const fwd = freeCam.getDirection(Vector3.Forward())
+      const right = freeCam.getDirection(Vector3.Right())
+      const move = new Vector3(0, 0, 0)
+      if (freeKeys.has('KeyW')) move.addInPlace(fwd)
+      if (freeKeys.has('KeyS')) move.subtractInPlace(fwd)
+      if (freeKeys.has('KeyA')) move.subtractInPlace(right)
+      if (freeKeys.has('KeyD')) move.addInPlace(right)
+      if (freeKeys.has('Space')) move.y += 1
+      if (freeKeys.has('ShiftLeft') || freeKeys.has('ShiftRight')) move.y -= 1
+      if (move.lengthSquared() > 0) {
+        freeCam.position.addInPlace(move.normalize().scale(FREE_SPEED * fdt))
+      }
+    })
+
     return () => {
       canvas.removeEventListener('click', requestLock)
       document.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      scene.onBeforeRenderObservable.remove(freeMover)
       arcCam.dispose()
       freeCam.dispose()
       gameStore.arcCam = null
@@ -186,13 +231,15 @@ export const CameraController = () => {
   }, [scene])
 
   useBeforeRender(() => {
-    const cam = gameStore.arcCam
-    const mesh = gameStore.mesh
-    if (!cam || gameStore.camMode !== 'third') return
-
     const now = performance.now()
     const dt = Math.min((now - lastTimeRef.current) / 1000, 0.05)
     lastTimeRef.current = now
+
+    // Free-fly camera (Ctrl+C) is driven by Babylon's own keyboard input; the
+    // orbit-follow logic below only runs in third-person.
+    const cam = gameStore.arcCam
+    const mesh = gameStore.mesh
+    if (!cam || gameStore.camMode !== 'third') return
 
     // Recenter the camera back behind the bird after free-look released.
     if (gameStore.recentering && !gameStore.freeLook) {

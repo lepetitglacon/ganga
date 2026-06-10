@@ -1,4 +1,4 @@
-import { Scene } from '@babylonjs/core'
+import { Color3, Scene } from '@babylonjs/core'
 import { HORIZON_COLOR } from './world.ts'
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,16 @@ export const fog = {
   setBaseDensity(d: number) {
     FOG.baseDensity = d
     this.apply()
+  },
+
+  /**
+   * Set the fog color (also the sky-horizon band). Used by BiomeController to
+   * lerp the haze tint as the bird crosses biomes. The custom shaders mirror
+   * scene.fogColor each frame, so writing it here propagates everywhere.
+   */
+  setColor(c: Color3) {
+    FOG.color = c
+    if (scene) scene.fogColor = c
   },
 
   /** Recompute scene.fogDensity from the baseline + current storm proximity. */
