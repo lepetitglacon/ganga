@@ -7,8 +7,12 @@ import { FadeOverlay } from './components/FadeOverlay.tsx'
 import { SceneSwitcher } from './components/SceneSwitcher.tsx'
 import type { GameScene } from './game/scenes/types.ts'
 import { testScene } from '@/game/scenes/TestScene.tsx'
+import {landingScene} from "@/game/scenes/LandingScene.tsx";
+import { introScene } from '@/game/scenes/IntroScene.tsx'
 
 // Register all game scenes
+sceneManager.register(landingScene)
+sceneManager.register(introScene)
 sceneManager.register(desertScene)
 sceneManager.register(testScene)
 

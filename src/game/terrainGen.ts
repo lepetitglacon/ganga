@@ -130,13 +130,16 @@ function fbm(x: number, y: number, octaves: number, gain: number): number {
 // the radially-symmetric blobs that raw fbm produces. This is the bare dune
 // height (noise + place flattening), WITHOUT oasis carving — oasis water levels
 // are derived from it, so it must stay carve-free to avoid feedback.
-function baseHeight(x: number, z: number): number {
+function duneNoise(x: number, z: number): number {
   const wx = fbm(x * 0.004, z * 0.004, 3, 0.5)
   const wz = fbm((x + 137) * 0.004, (z + 53) * 0.004, 3, 0.5)
   const base = fbm(x * 0.00175 + wx * 3.0, z * 0.00175 + wz * 3.0, 5, 0.55)
   const ripples = (fbm(x * 0.18, z * 0.18, 2, 0.5) - 0.5) * 0.7
-  const h = (base - 0.5) * 150 + ripples
-  return applyPlaceFlattening(x, z, h)
+  return (base - 0.5) * 150 + ripples
+}
+
+function baseHeight(x: number, z: number): number {
+  return applyPlaceFlattening(x, z, duneNoise(x, z))
 }
 
 // --- oasis carving ----------------------------------------------------------
@@ -197,6 +200,14 @@ function applyOasisCarving(x: number, z: number, h: number): number {
 
 function heightAt(x: number, z: number): number {
   return applyOasisCarving(x, z, baseHeight(x, z))
+}
+
+// Bare dune height — pure noise only, WITHOUT oasis carving or place
+// flattening. Used by the landing/intro backdrop, which wants clean sand dunes
+// (no oases, no biome tint, no village footprint) like the world before any of
+// that was added.
+export function getDuneHeight(x: number, z: number): number {
+  return duneNoise(x, z)
 }
 
 export function getTerrainHeight(worldX: number, worldZ: number): number {

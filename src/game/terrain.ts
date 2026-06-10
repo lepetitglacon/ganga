@@ -16,6 +16,7 @@ import { getTerrainNormalComponents } from './terrainGen.ts'
 // working unchanged.
 export {
   getTerrainHeight,
+  getDuneHeight,
   generateHeightData,
   ensureOasesResolved,
   setFlattenPlaces,
