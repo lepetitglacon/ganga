@@ -1,77 +1,61 @@
-import { useEffect } from 'react'
-import { Engine, Scene } from 'react-babylonjs'
-import { Color4 } from '@babylonjs/core'
-import { audio } from './game/audio.ts'
-import { subscribeQuestUnlock } from './game/quests.ts'
-import { LightSetup } from './components/LightSetup.tsx'
-import { Environment } from './components/Environment.tsx'
-import { Map } from './components/Map.tsx'
-import { Animals } from './components/Animals.tsx'
-import { Caravan } from './components/Caravan.tsx'
-import { Water } from './components/Water.tsx'
-import { WetnessMask } from './components/WetnessMask.tsx'
-import { Player } from './components/Player.tsx'
-import { WaterDrops } from './components/WaterDrops.tsx'
-import { CameraController } from './components/CameraController.tsx'
-import { PostProcess } from './components/PostProcess.tsx'
-import { Storms } from './components/Storms.tsx'
-import { Clouds } from './components/Clouds.tsx'
-import { PhysicsDebug } from './components/PhysicsDebug.tsx'
-import { ThermalDebug } from './components/ThermalDebug.tsx'
-import { StormDebug } from './components/StormDebug.tsx'
-import { HUD } from './components/HUD.tsx'
-import { QuestMenu } from './components/QuestMenu.tsx'
-import { QuestToast } from './components/QuestToast.tsx'
-import { DebugPanel } from './components/DebugPanel.tsx'
-import { PlaceAmbience } from './components/PlaceAmbience.tsx'
-import { LensFlareComponent } from './components/LensFlare.tsx'
-import { IntroSequence } from './components/IntroSequence.tsx'
-import { Cutscene } from './components/Cutscene.tsx'
-import { VillageCelebration } from './components/VillageCelebration.tsx'
-import { SourceCutscene } from './components/SourceCutscene.tsx'
-import { Loader } from './components/Loader.tsx'
-import { MuteButton } from './components/MuteButton.tsx'
+import { useEffect, useState } from 'react'
+import { Engine, Scene, useScene } from 'react-babylonjs'
+import { Color4, FreeCamera, Vector3 } from '@babylonjs/core'
+import { sceneManager } from './game/sceneManager.ts'
+import { desertScene } from './game/scenes/DesertScene.tsx'
+import { FadeOverlay } from './components/FadeOverlay.tsx'
+import { SceneSwitcher } from './components/SceneSwitcher.tsx'
+import type { GameScene } from './game/scenes/types.ts'
+import { testScene } from '@/game/scenes/TestScene.tsx'
 
-const UNLOCK_SOUND_URL = '/sound/quests/unlock-quest.wav'
+// Register all game scenes
+sceneManager.register(desertScene)
+sceneManager.register(testScene)
+
+// Fallback camera so Babylon never throws "No camera defined" between scene
+// switches. Registers itself with sceneManager so switchTo() can activate it
+// synchronously before React unmounts the old scene's cameras.
+const FallbackCamera = () => {
+  const scene = useScene()
+  useEffect(() => {
+    if (!scene) return
+    const cam = new FreeCamera('__fallback', new Vector3(0, 10, 0), scene)
+    cam.minZ = 0.1
+    sceneManager._setBabylonScene(scene, cam)
+
+    return () => {
+      sceneManager._setBabylonScene(null, null)
+      cam.dispose()
+    }
+  }, [scene])
+  return null
+}
 
 export default function App() {
-  // Play the unlock jingle whenever a new quest becomes available.
-  useEffect(() => subscribeQuestUnlock(() => audio.playOneShot(UNLOCK_SOUND_URL)), [])
+  const [activeScene, setActiveScene] = useState<GameScene | null>(sceneManager.getActive)
+
+  useEffect(
+    () =>
+      sceneManager.subscribe(() => {
+        setActiveScene(sceneManager.getActive())
+      }),
+    [],
+  )
+
+  const SceneContent = activeScene?.SceneContent
+  const Overlay = activeScene?.Overlay
 
   return (
     <div style={{ width: '100dvw', height: '100dvh' }}>
       <Engine antialias adaptToDeviceRatio canvasId="main-canvas" engineOptions={{ audioEngine: true }}>
         <Scene clearColor={new Color4(0.96, 0.78, 0.58, 1)}>
-          <LightSetup />
-          <Environment />
-          <LensFlareComponent />
-          <Map />
-          <Animals />
-          <Caravan />
-          <Water />
-          <WetnessMask />
-          <CameraController />
-          <IntroSequence />
-          <Cutscene />
-          <VillageCelebration />
-          <SourceCutscene />
-          <PostProcess />
-          <Player />
-          <WaterDrops />
-          <PlaceAmbience />
-          <Storms maxConcurrent={3} />
-          <Clouds count={16} />
-          <PhysicsDebug />
-          <ThermalDebug />
-          <StormDebug />
+          <FallbackCamera />
+          {SceneContent && <SceneContent />}
         </Scene>
       </Engine>
-      <HUD />
-      <QuestMenu />
-      <QuestToast />
-      <DebugPanel />
-      <Loader />
-      <MuteButton />
+      {Overlay && <Overlay />}
+      <SceneSwitcher />
+      <FadeOverlay />
     </div>
   )
 }

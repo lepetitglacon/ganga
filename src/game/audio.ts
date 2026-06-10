@@ -23,9 +23,13 @@ function rampVolume(sound: StaticSound, to: number, durMs: number): void {
   }
   const start = performance.now()
   const tick = () => {
-    const t = Math.min(1, (performance.now() - start) / durMs)
-    sound.volume = from + (to - from) * t
-    if (t < 1) requestAnimationFrame(tick)
+    try {
+      const t = Math.min(1, (performance.now() - start) / durMs)
+      sound.volume = from + (to - from) * t
+      if (t < 1) requestAnimationFrame(tick)
+    } catch {
+      // Sound was disposed during the ramp — silently stop.
+    }
   }
   tick()
 }
@@ -212,7 +216,11 @@ class AudioManager {
       setVolume(v: number) {
         current = v
         void soundP.then((s) => {
-          s.volume = v
+          try {
+            s.volume = v
+          } catch {
+            // Sound was disposed — ignore.
+          }
         })
       },
     }
